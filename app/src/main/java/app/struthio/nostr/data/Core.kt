@@ -54,6 +54,7 @@ import app.struthio.nostr.core.randomBytes
 import app.struthio.nostr.core.parseRelayInfo
 import app.struthio.nostr.core.pollTags
 import app.struthio.nostr.core.reactionGlyph
+import app.struthio.nostr.core.customGlyph
 import app.struthio.nostr.core.replyTags
 import app.struthio.nostr.core.reportTags
 import app.struthio.nostr.core.roomOf
@@ -181,6 +182,15 @@ class Core(private val context: Context) {
                     override fun onLost(network: Network) = pool.networkLost(network)
                 },
             )
+        }
+        // Chats once dropped reactions and what a message replied to. Opening the old messages once more
+        // recovers both. Not with a remote signer: every message would be another round trip to it.
+        if (!prefs.getBoolean("dm_reread_v5", false)) {
+            if (prefs.getString("bunker_remote", null) == null) {
+                store.forgetOpenedWraps()
+                prefs.edit().putLong("dm_since", 0L).apply()
+            }
+            prefs.edit().putBoolean("dm_reread_v5", true).apply()
         }
         scope.launch { ingestLoop() }
         scope.launch {
@@ -1146,8 +1156,17 @@ class Core(private val context: Context) {
                     file?.type?.startsWith("image/") == true -> "Photo"
                     else -> "File"
                 }
-                store.addDm(Dm(rumor.id, roomKey(roomOf(rumor)), rumor.pubkey, rumor.createdAt, text, file))
+                val replyTo = rumor.tags.firstOrNull { it.size >= 2 && it[0] == "e" && Hex.isKey(it[1]) }?.get(1)
+                store.addDm(Dm(rumor.id, roomKey(roomOf(rumor)), rumor.pubkey, rumor.createdAt, text, file, replyTo))
                 changes.tryEmit(Unit)
+            } else if (rumor.pubkey !in muted.value && rumor.kind == Kind.REACTION) {
+                // NIP-17 carries NIP-25 reactions too: the last `e` tag is the message reacted to.
+                rumor.tags.lastOrNull { it.size >= 2 && it[0] == "e" && Hex.isKey(it[1]) }?.get(1)?.let { target ->
+                    // Dislikes ("-") aren't shown, in chats as in notes.
+                    val glyph = reactionGlyph(rumor.content) ?: customGlyph(rumor.content, rumor.tags)
+                    if (glyph != null) store.addDmReaction(roomKey(roomOf(rumor)), DmReaction(rumor.id, target, rumor.pubkey, glyph, rumor.createdAt))
+                    changes.tryEmit(Unit)
+                }
             }
             AppLog.add("opened a message")
             store.addWrap(wrap.id)
@@ -1185,7 +1204,8 @@ class Core(private val context: Context) {
         return store.latest(pubkey, Kind.DM_RELAYS)?.tags?.values("relay")?.mapNotNull(::normalizeRelay).orEmpty()
     }
 
-    private suspend fun deliver(room: Set<String>, kind: Int, extraTags: Tags, content: String, file: FileMessage?, preview: String) {
+    /** Seals and sends one rumor to everyone in the room, and a copy to yourself. Returns what was sent. */
+    private suspend fun deliver(room: Set<String>, kind: Int, extraTags: Tags, content: String): Draft {
         val active = signer.value ?: throw UserError("Sign in first.")
         val others = room - active.pubkey
         val mine = dmRelays.value
@@ -1212,11 +1232,30 @@ class Core(private val context: Context) {
         } else {
             scope.launch { pool.publish(ownCopy, mine.toSet()) }
         }
-        store.addDm(Dm(rumor.id, roomKey(room), active.pubkey, rumor.createdAt, preview, file))
+        return rumor
+    }
+
+    /**
+     * A chat message, optionally answering an earlier one. Posts linked in it get `q` tags so other
+     * apps can show them as cards; the room itself is never changed by what's mentioned.
+     */
+    suspend fun sendMessage(room: Set<String>, text: String, replyTo: Dm? = null) {
+        val (content, mentioned) = prepareContent(text)
+        val tags = ArrayList<List<String>>()
+        replyTo?.let { tags += listOf("e", it.id) }
+        tags += mentioned.filter { it.firstOrNull() == "q" }
+        val rumor = deliver(room, Kind.DM, tags, content)
+        store.addDm(Dm(rumor.id, roomKey(room), rumor.pubkey, rumor.createdAt, content, null, replyTo?.id))
         changes.tryEmit(Unit)
     }
 
-    suspend fun sendMessage(room: Set<String>, text: String) = deliver(room, Kind.DM, emptyList(), text, null, text)
+    /** A reaction to a message, sealed like the messages themselves so only the room sees it. */
+    suspend fun reactToMessage(room: Set<String>, message: Dm, emoji: String) {
+        val kind = if (message.file != null) Kind.FILE_DM else Kind.DM
+        val rumor = deliver(room, Kind.REACTION, listOf(listOf("e", message.id), listOf("k", kind.toString())), emoji)
+        store.addDmReaction(roomKey(room), DmReaction(rumor.id, message.id, rumor.pubkey, emoji, rumor.createdAt))
+        changes.tryEmit(Unit)
+    }
 
     /** NIP-17 kind 15: the file is encrypted here, and the server only ever holds ciphertext. */
     suspend fun sendFile(room: Set<String>, data: ByteArray, type: String, width: Int, height: Int) {
@@ -1237,7 +1276,9 @@ class Core(private val context: Context) {
             upload.url, type, Hex.encode(key), Hex.encode(nonce), upload.sha256,
             if (height > 0) width.toFloat() / height else null,
         )
-        deliver(room, Kind.FILE_DM, tags, upload.url, file, if (type.startsWith("image/")) "Photo" else "File")
+        val rumor = deliver(room, Kind.FILE_DM, tags, upload.url)
+        store.addDm(Dm(rumor.id, roomKey(room), rumor.pubkey, rumor.createdAt, if (type.startsWith("image/")) "Photo" else "File", file))
+        changes.tryEmit(Unit)
     }
 
     /** Downloads, checks and decrypts an attachment. The plaintext is never written to disk here. */

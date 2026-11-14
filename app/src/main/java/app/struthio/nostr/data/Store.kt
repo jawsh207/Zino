@@ -44,7 +44,12 @@ data class Dm(
     val createdAt: Long,
     val content: String,
     val file: FileMessage? = null,
+    /** The message this one answers (NIP-17 `e` tag). */
+    val replyTo: String? = null,
 )
+
+/** A reaction sent inside a private chat (NIP-17 with NIP-25), to one message. */
+data class DmReaction(val id: String, val target: String, val sender: String, val content: String, val createdAt: Long)
 
 data class Room(val key: String, val members: List<String>, val last: Dm)
 
@@ -73,8 +78,10 @@ data class Alert(val event: Event, val actor: String, val msats: Long, val comme
 
 /** Local cache on the platform's SQLite: the first thing every screen shows. */
 private const val CREATE_READS = "CREATE TABLE reads(key TEXT PRIMARY KEY, at INTEGER NOT NULL)"
+private const val CREATE_DM_REACTIONS =
+    "CREATE TABLE dm_reactions(id TEXT PRIMARY KEY, room TEXT NOT NULL, target TEXT NOT NULL, sender TEXT NOT NULL, content TEXT NOT NULL, created_at INTEGER NOT NULL)"
 
-class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 4) {
+class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5) {
 
     override fun onConfigure(db: SQLiteDatabase) {
         db.enableWriteAheadLogging()
@@ -104,9 +111,11 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 4
         db.execSQL(
             """CREATE TABLE dms(
                 id TEXT PRIMARY KEY, room TEXT NOT NULL, sender TEXT NOT NULL,
-                created_at INTEGER NOT NULL, content TEXT NOT NULL, file TEXT)""",
+                created_at INTEGER NOT NULL, content TEXT NOT NULL, file TEXT, reply_to TEXT)""",
         )
         db.execSQL("CREATE INDEX dms_room ON dms(room, created_at DESC)")
+        db.execSQL(CREATE_DM_REACTIONS)
+        db.execSQL("CREATE INDEX dm_reactions_room ON dm_reactions(room)")
         db.execSQL("CREATE TABLE wraps(id TEXT PRIMARY KEY)")
         db.execSQL("CREATE TABLE follows(pubkey TEXT PRIMARY KEY)")
         db.execSQL("CREATE TABLE trusted(pubkey TEXT PRIMARY KEY)")
@@ -117,6 +126,11 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 4
         if (oldVersion < 2) db.execSQL("ALTER TABLE dms ADD COLUMN file TEXT")
         if (oldVersion < 3) db.execSQL("CREATE TABLE trusted(pubkey TEXT PRIMARY KEY)")
         if (oldVersion < 4) db.execSQL(CREATE_READS)
+        if (oldVersion < 5) {
+            db.execSQL("ALTER TABLE dms ADD COLUMN reply_to TEXT")
+            db.execSQL(CREATE_DM_REACTIONS)
+            db.execSQL("CREATE INDEX dm_reactions_room ON dm_reactions(room)")
+        }
     }
 
     /** Stores a batch and returns what is new. */
@@ -221,6 +235,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 4
     private fun Cursor.dm() = Dm(
         getString(0), getString(1), getString(2), getLong(3), getString(4),
         if (isNull(5)) null else fileFromJson(getString(5)),
+        if (isNull(6)) null else getString(6),
     )
 
     private inline fun events(sql: String, args: Array<String> = emptyArray(), block: (Event) -> Unit = {}): List<Event> {
@@ -476,14 +491,48 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 4
             put("created_at", dm.createdAt)
             put("content", dm.content)
             put("file", dm.file?.let(::fileToJson))
+            put("reply_to", dm.replyTo)
         }
         writableDatabase.insertWithOnConflict("dms", null, values, SQLiteDatabase.CONFLICT_IGNORE)
+        // A message read again (as when older chats are reopened) may now know what it replies to.
+        dm.replyTo?.let { writableDatabase.execSQL("UPDATE dms SET reply_to=? WHERE id=? AND reply_to IS NULL", arrayOf(it, dm.id)) }
+    }
+
+    fun addDmReaction(room: String, reaction: DmReaction) {
+        val values = ContentValues(6).apply {
+            put("id", reaction.id)
+            put("room", room)
+            put("target", reaction.target)
+            put("sender", reaction.sender)
+            put("content", reaction.content)
+            put("created_at", reaction.createdAt)
+        }
+        writableDatabase.insertWithOnConflict("dm_reactions", null, values, SQLiteDatabase.CONFLICT_IGNORE)
+    }
+
+    /** Reactions in a chat, by the message they're on. */
+    fun dmReactions(room: String): Map<String, List<DmReaction>> {
+        val out = HashMap<String, MutableList<DmReaction>>()
+        readableDatabase.rawQuery(
+            "SELECT id, target, sender, content, created_at FROM dm_reactions WHERE room=? ORDER BY created_at",
+            arrayOf(room),
+        ).use {
+            while (it.moveToNext()) {
+                val r = DmReaction(it.getString(0), it.getString(1), it.getString(2), it.getString(3), it.getLong(4))
+                out.getOrPut(r.target) { ArrayList() } += r
+            }
+        }
+        return out
+    }
+
+    fun forgetOpenedWraps() {
+        writableDatabase.execSQL("DELETE FROM wraps")
     }
 
     fun rooms(me: String): List<Room> {
         val out = ArrayList<Room>()
         readableDatabase.rawQuery(
-            """SELECT d.id, d.room, d.sender, d.created_at, d.content, d.file FROM dms d
+            """SELECT d.id, d.room, d.sender, d.created_at, d.content, d.file, d.reply_to FROM dms d
                JOIN (SELECT room, MAX(created_at) AS t FROM dms GROUP BY room) m
                ON m.room=d.room AND m.t=d.created_at GROUP BY d.room ORDER BY d.created_at DESC""",
             null,
@@ -499,7 +548,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 4
     fun messages(room: String, limit: Int): List<Dm> {
         val out = ArrayList<Dm>()
         readableDatabase.rawQuery(
-            "SELECT id, room, sender, created_at, content, file FROM dms WHERE room=? ORDER BY created_at DESC LIMIT ?",
+            "SELECT id, room, sender, created_at, content, file, reply_to FROM dms WHERE room=? ORDER BY created_at DESC LIMIT ?",
             arrayOf(room, limit.toString()),
         ).use {
             while (it.moveToNext()) out += it.dm()
@@ -550,7 +599,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 4
     fun clearAll() {
         writableDatabase.execSQL("DELETE FROM reads")
         val db = writableDatabase
-        for (table in listOf("refs", "zaps", "providers", "dms", "wraps", "follows", "trusted", "events")) db.delete(table, null, null)
+        for (table in listOf("refs", "zaps", "providers", "dms", "dm_reactions", "wraps", "follows", "trusted", "events")) db.delete(table, null, null)
         db.execSQL("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')")
     }
 

@@ -1,5 +1,30 @@
 package app.struthio.nostr.ui
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.automirrored.rounded.Reply
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+import app.struthio.nostr.core.Entity
+import app.struthio.nostr.core.Part
+import app.struthio.nostr.data.DmReaction
+import kotlinx.coroutines.launch
 import app.struthio.nostr.core.parseContent
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -10,7 +35,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -61,9 +85,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import app.struthio.nostr.core.Entity
 import app.struthio.nostr.core.FileMessage
 import app.struthio.nostr.core.invoicesIn
 import app.struthio.nostr.core.replaceInvoices
@@ -201,6 +223,18 @@ fun ChatScreen(room: String) {
     val members = remember(room) { room.split(',').toSet() }
     val others = members - me
     val messages by liveQuery(emptyList<Dm>(), room) { core.store.messages(room, 300) }
+    val reactions by liveQuery(emptyMap<String, List<DmReaction>>(), room) { core.store.dmReactions(room) }
+    val byId = remember(messages) { messages.associateBy { it.id } }
+    val list = rememberLazyListState()
+    var replyTo by remember { mutableStateOf<Dm?>(null) }
+    var acting by remember { mutableStateOf<Dm?>(null) }
+    var picking by remember { mutableStateOf<Dm?>(null) }
+    val clipboard = LocalClipboardManager.current
+    fun react(dm: Dm, emoji: String) {
+        // One of each emoji per person: tapping a reaction you've already sent does nothing.
+        if (reactions[dm.id].orEmpty().any { it.sender == me && it.content == emoji }) return
+        scope.act(nav) { core.reactToMessage(members, dm, emoji) }
+    }
     var text by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
@@ -240,6 +274,7 @@ fun ChatScreen(room: String) {
         BackBar(others.joinToString(", ") { core.displayName(it) })
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth(),
+            state = list,
             reverseLayout = true,
             contentPadding = PaddingValues(horizontal = PageGutter, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -248,12 +283,33 @@ fun ChatScreen(room: String) {
                 // The list runs newest first, so the next item is the message before this one.
                 val before = messages.getOrNull(index + 1)
                 if (before == null || dayOf(before.createdAt) != dayOf(dm.createdAt)) DateDivider(dm.createdAt)
-                Bubble(dm, dm.sender == me, others.size > 1, onSave = { file -> saving = file })
+                Bubble(
+                    dm, dm.sender == me, others.size > 1,
+                    replied = dm.replyTo?.let { byId[it] },
+                    hasReply = dm.replyTo != null,
+                    reactions = reactions[dm.id].orEmpty(),
+                    me = me,
+                    onSave = { file -> saving = file },
+                    onLongPress = { acting = dm },
+                    onReact = { react(dm, it) },
+                    onOpenReply = {
+                        // Older messages may not be loaded; then there's nowhere to jump to.
+                        val at = messages.indexOfFirst { it.id == dm.replyTo }
+                        if (at >= 0) scope.launch { list.animateScrollToItem(at) }
+                    },
+                )
             }
         }
         Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+          Column(Modifier.navigationBarsPadding()) {
+            replyTo?.let { target ->
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ReplyQuote(target, Modifier.weight(1f))
+                    IconButton({ replyTo = null }) { Icon(Icons.Rounded.Close, "Cancel reply") }
+                }
+            }
             Row(
-                Modifier.fillMaxWidth().padding(8.dp).navigationBarsPadding(),
+                Modifier.fillMaxWidth().padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -281,8 +337,9 @@ fun ChatScreen(room: String) {
                         sending = true
                         scope.act(nav) {
                             try {
-                                core.sendMessage(members, text.trim())
+                                core.sendMessage(members, text.trim(), replyTo)
                                 text = ""
+                                replyTo = null
                             } finally {
                                 sending = false
                             }
@@ -291,12 +348,103 @@ fun ChatScreen(room: String) {
                     enabled = text.isNotBlank() && !sending,
                 ) { Icon(Icons.AutoMirrored.Rounded.Send, "Send") }
             }
+          }
+        }
+    }
+    acting?.let { dm ->
+        MessageActions(
+            dm,
+            onDismiss = { acting = null },
+            onReact = { emoji -> acting = null; react(dm, emoji) },
+            onMore = { acting = null; picking = dm },
+            onReply = { acting = null; replyTo = dm },
+            onCopy = if (dm.file == null) ({ acting = null; clipboard.setText(AnnotatedString(dm.content)); nav.say("Copied") }) else null,
+        )
+    }
+    picking?.let { dm -> EmojiSheet(onPick = { picking = null; react(dm, it) }, onDismiss = { picking = null }) }
+}
+
+/** Long press on a message: a quick reaction, any emoji, reply, or copy. */
+@Composable
+private fun MessageActions(dm: Dm, onDismiss: () -> Unit, onReact: (String) -> Unit, onMore: () -> Unit, onReply: () -> Unit, onCopy: (() -> Unit)?) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                QUICK_REACTIONS.forEach { emoji ->
+                    Box(
+                        Modifier.size(46.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh).clickable { onReact(emoji) },
+                        contentAlignment = Alignment.Center,
+                    ) { Text(emoji, fontSize = 22.sp) }
+                }
+                Box(
+                    Modifier.size(46.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh).clickable(onClick = onMore),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Rounded.Add, "More reactions") }
+            }
+            ListItem(
+                headlineContent = { Text("Reply") },
+                leadingContent = { Icon(Icons.AutoMirrored.Rounded.Reply, null) },
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable(onClick = onReply),
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
+            onCopy?.let {
+                ListItem(
+                    headlineContent = { Text("Copy text") },
+                    leadingContent = { Icon(Icons.Rounded.ContentCopy, null) },
+                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable(onClick = it),
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            }
+        }
+    }
+}
+
+private val QUICK_REACTIONS = listOf("💜", "👍", "😂", "😮", "😢", "🔥")
+
+/** The message being answered, small: who wrote it and how it began. */
+@Composable
+private fun ReplyQuote(dm: Dm?, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
+    val core = LocalCore.current
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier
+            .clip(RoundedCornerShape(10.dp))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .height(IntrinsicSize.Min),
+    ) {
+        Box(Modifier.width(3.dp).fillMaxHeight().background(colors.primary, RoundedCornerShape(2.dp)))
+        Column(Modifier.padding(start = 8.dp, top = 2.dp, bottom = 2.dp)) {
+            Text(
+                dm?.let { if (it.sender == core.me) "You" else core.displayName(it.sender) } ?: "Earlier message",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.primary,
+                maxLines = 1,
+            )
+            Text(
+                dm?.content?.replace('\n', ' ') ?: "Not loaded",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
 
 @Composable
-private fun Bubble(dm: Dm, mine: Boolean, group: Boolean, onSave: (FileMessage) -> Unit) {
+private fun Bubble(
+    dm: Dm,
+    mine: Boolean,
+    group: Boolean,
+    replied: Dm?,
+    hasReply: Boolean,
+    reactions: List<DmReaction>,
+    me: String,
+    onSave: (FileMessage) -> Unit,
+    onLongPress: () -> Unit,
+    onReact: (String) -> Unit,
+    onOpenReply: () -> Unit,
+) {
     val core = LocalCore.current
     val colors = MaterialTheme.colorScheme
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
@@ -305,24 +453,55 @@ private fun Bubble(dm: Dm, mine: Boolean, group: Boolean, onSave: (FileMessage) 
                 .widthIn(max = 300.dp)
                 .clip(RoundedCornerShape(20.dp, 20.dp, if (mine) 6.dp else 20.dp, if (mine) 20.dp else 6.dp))
                 .background(if (mine) colors.primaryContainer else colors.surfaceBright)
+                .combinedClickable(onClick = {}, onLongClick = onLongPress, onLongClickLabel = "React or reply")
                 .padding(horizontal = 14.dp, vertical = 9.dp),
         ) {
             if (group && !mine) Text(core.displayName(dm.sender), style = MaterialTheme.typography.labelMedium, color = colors.primary)
+            if (hasReply) ReplyQuote(replied, Modifier.padding(bottom = 6.dp), onClick = onOpenReply)
             val file = dm.file
             when {
                 file == null -> {
                     val invoices = remember(dm.content) { invoicesIn(dm.content) }
                     val text = remember(dm.content) { replaceInvoices(dm.content) { "" }.trim() }
-                    if (text.isNotEmpty()) {
-                        // Links, hashtags and mentions work here as they do in notes.
-                        Text(linkedText(remember(text) { parseContent(text) }, emptyMap()), color = if (mine) colors.onPrimaryContainer else colors.onSurface)
+                    val parts = remember(text) { parseContent(text) }
+                    // Linked posts and articles show as cards, as in notes, rather than as links.
+                    val quoted = remember(parts) {
+                        parts.filterIsInstance<Part.Mention>().map { it.entity }.filter { it is Entity.Note || it is Entity.Address }.distinct()
                     }
+                    val shown = remember(parts) {
+                        parts.filterNot { it is Part.Mention && (it.entity is Entity.Note || it.entity is Entity.Address) }
+                    }
+                    if (shown.any { it !is Part.Text || it.text.isNotBlank() }) {
+                        // Links, hashtags and mentions work here as they do in notes.
+                        Text(linkedText(shown, emptyMap()), color = if (mine) colors.onPrimaryContainer else colors.onSurface)
+                    }
+                    quoted.forEach { QuoteCard(it) }
                     invoices.forEach { InvoiceCard(it) }
                 }
                 file.type.startsWith("image/") -> EncryptedImage(file)
                 else -> TextButton({ onSave(file) }) {
                     Icon(Icons.Rounded.AttachFile, null)
                     Text("Save file")
+                }
+            }
+        }
+        if (reactions.isNotEmpty()) {
+            // Each emoji once, with how many sent it; yours stands out.
+            val grouped = remember(reactions) { reactions.groupBy { it.content }.toList().sortedByDescending { it.second.size } }
+            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                grouped.forEach { (emoji, by) ->
+                    val minePick = by.any { it.sender == me }
+                    Surface(
+                        onClick = { onReact(emoji) },
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (minePick) colors.secondaryContainer else colors.surfaceContainerHigh,
+                    ) {
+                        Text(
+                            if (by.size > 1) "$emoji ${by.size}" else emoji,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
                 }
             }
         }

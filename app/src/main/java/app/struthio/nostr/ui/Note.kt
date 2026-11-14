@@ -321,7 +321,7 @@ private fun NoteContent(event: Event, detail: Boolean, inQuote: Boolean) {
 }
 
 @Composable
-private fun QuoteCard(ref: Entity) {
+internal fun QuoteCard(ref: Entity) {
     val core = LocalCore.current
     val nav = LocalNav.current
     // A note by id, or an article or editable video by address.
