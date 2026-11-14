@@ -416,8 +416,7 @@ private fun ReplyQuote(dm: Dm?, modifier: Modifier = Modifier, onClick: (() -> U
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .height(IntrinsicSize.Min),
     ) {
-        Box(Modifier.width(4.dp).fillMaxHeight().background(colors.primary))
-        Column(Modifier.padding(start = 10.dp, end = 12.dp, top = 7.dp, bottom = 7.dp)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 7.dp)) {
             Text(
                 dm?.let { if (it.sender == core.me) "You" else core.displayName(it.sender) } ?: "Earlier message",
                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
