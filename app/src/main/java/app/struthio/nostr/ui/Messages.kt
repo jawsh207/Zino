@@ -402,31 +402,32 @@ private fun MessageActions(dm: Dm, onDismiss: () -> Unit, onReact: (String) -> U
 private val QUICK_REACTIONS = listOf("💜", "👍", "😂", "😮", "😢", "🔥")
 
 /**
- * The message being answered, small: who wrote it and how it began. Drawn in [ink], the colour of
- * the text around it, on a faint wash of the same, so it reads on any bubble in any theme.
+ * The message being answered, small: who wrote it and how it began. It sits on its own card, like a
+ * Lightning invoice in a message, so it reads the same on any bubble in any theme.
  */
 @Composable
-private fun ReplyQuote(dm: Dm?, modifier: Modifier = Modifier, ink: Color = MaterialTheme.colorScheme.onSurface, onClick: (() -> Unit)? = null) {
+private fun ReplyQuote(dm: Dm?, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
     val core = LocalCore.current
+    val colors = MaterialTheme.colorScheme
     Row(
         modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(ink.copy(alpha = 0.08f))
+            .clip(RoundedCornerShape(14.dp))
+            .background(colors.surfaceContainer)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .height(IntrinsicSize.Min),
     ) {
-        Box(Modifier.width(4.dp).fillMaxHeight().background(ink.copy(alpha = 0.55f)))
-        Column(Modifier.padding(start = 8.dp, end = 10.dp, top = 5.dp, bottom = 5.dp)) {
+        Box(Modifier.width(4.dp).fillMaxHeight().background(colors.primary))
+        Column(Modifier.padding(start = 10.dp, end = 12.dp, top = 7.dp, bottom = 7.dp)) {
             Text(
                 dm?.let { if (it.sender == core.me) "You" else core.displayName(it.sender) } ?: "Earlier message",
                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                color = ink,
+                color = colors.primary,
                 maxLines = 1,
             )
             Text(
                 dm?.content?.replace('\n', ' ') ?: "Not loaded",
                 style = MaterialTheme.typography.bodyMedium,
-                color = ink.copy(alpha = 0.85f),
+                color = colors.onSurface,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -460,7 +461,7 @@ private fun Bubble(
                 .padding(horizontal = 14.dp, vertical = 9.dp),
         ) {
             if (group && !mine) Text(core.displayName(dm.sender), style = MaterialTheme.typography.labelMedium, color = colors.primary)
-            if (hasReply) ReplyQuote(replied, Modifier.padding(bottom = 6.dp), ink = if (mine) colors.onPrimaryContainer else colors.onSurface, onClick = onOpenReply)
+            if (hasReply) ReplyQuote(replied, Modifier.padding(bottom = 6.dp), onClick = onOpenReply)
             val file = dm.file
             when {
                 file == null -> {
