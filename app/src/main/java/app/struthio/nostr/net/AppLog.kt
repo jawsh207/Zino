@@ -1,3 +1,7 @@
+/*
+ * The app's log: a short, private record of connections, sign-ins and errors, kept on the phone
+ * and shared only when the user copies it.
+ */
 package app.struthio.nostr.net
 
 import java.io.File
@@ -25,9 +29,11 @@ object AppLog {
     /** Connection errors name this phone's own address, which is nobody else's business. */
     private val OWN_ADDRESS = Regex(" from /[0-9a-fA-F:.%]+ \\(port \\d+\\)")
 
+    /** The text with keys, secrets and the device's own address hidden. */
     fun scrub(text: String): String =
         SECRETS.fold(text) { out, secret -> out.replace(secret, "[hidden]") }.replace(OWN_ADDRESS, "")
 
+    /** Starts logging to a file, keeping the last lines from before. */
     @Synchronized
     fun start(target: File) {
         file = target
@@ -40,6 +46,7 @@ object AppLog {
         }
     }
 
+    /** Adds a timestamped line. */
     @Synchronized
     fun add(text: String) {
         val line = time.format(Date()) + " " + scrub(text).replace('\n', ' ')
@@ -48,9 +55,11 @@ object AppLog {
         runCatching { file?.appendText(line + "\n") }
     }
 
+    /** The whole log, for sharing. */
     @Synchronized
     fun text(): String = lines.joinToString("\n")
 
+    /** Empties the log. */
     @Synchronized
     fun clear() {
         lines.clear()

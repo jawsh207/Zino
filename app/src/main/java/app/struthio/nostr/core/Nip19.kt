@@ -1,3 +1,7 @@
+/*
+ * Nostr's shareable codes, NIP-19 and NIP-21: npub, nsec, note, nevent, nprofile and naddr, in
+ * Bech32 with type-length-value fields for relays, authors and kinds. Also reads nostr: links.
+ */
 package app.struthio.nostr.core
 
 import java.io.ByteArrayOutputStream
@@ -7,6 +11,7 @@ object Bech32 {
     private const val CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
     private val GEN = intArrayOf(0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3)
 
+    /** Bech32's checksum over a run of 5-bit values. */
     private fun polymod(values: IntArray): Int {
         var chk = 1
         for (v in values) {
@@ -17,6 +22,7 @@ object Bech32 {
         return chk
     }
 
+    /** The prefix expanded the way Bech32's checksum needs. */
     private fun hrpExpand(hrp: String): IntArray =
         IntArray(hrp.length * 2 + 1).also { out ->
             hrp.forEachIndexed { i, c ->
@@ -25,6 +31,7 @@ object Bech32 {
             }
         }
 
+    /** Regroups bits, as between 8-bit bytes and Bech32's 5-bit words. */
     private fun convert(data: ByteArray, from: Int, to: Int, pad: Boolean): ByteArray {
         var acc = 0
         var bits = 0
@@ -47,6 +54,7 @@ object Bech32 {
         return out.toByteArray()
     }
 
+    /** Encodes bytes under a prefix, like npub or note. */
     fun encode(hrp: String, data: ByteArray): String {
         val five = convert(data, 8, 5, true).map { it.toInt() }.toIntArray()
         val values = hrpExpand(hrp) + five + IntArray(6)
@@ -72,26 +80,35 @@ object Bech32 {
         return hrp to ByteArray(values.size - 6) { values[it].toByte() }
     }
 
+    /** 5-bit words back to bytes. */
     fun wordsToBytes(words: ByteArray): ByteArray = convert(words, 5, 8, false)
 
+    /** Decodes a Bech32 string to its prefix and bytes. */
     fun decode(input: String): Pair<String, ByteArray> {
         val (hrp, words) = decodeWords(input)
         return hrp to wordsToBytes(words)
     }
 }
 
+/** What a NIP-19 code points to. */
 sealed interface Entity {
+    /** A person, with relays that may have their posts. */
     data class Profile(val pubkey: String, val relays: List<String> = emptyList()) : Entity
+    /** A private key. Compared by value, as byte arrays aren't. */
     data class Secret(val key: ByteArray) : Entity {
+        /** Equal when the keys are the same bytes. */
         override fun equals(other: Any?) = other is Secret && other.key.contentEquals(key)
+        /** Hashes the key's bytes. */
         override fun hashCode() = key.contentHashCode()
     }
+    /** A post by id, with hints where to find it: relays, author and kind. */
     data class Note(
         val id: String,
         val relays: List<String> = emptyList(),
         val author: String? = null,
         val kind: Int? = null,
     ) : Entity
+    /** An addressable post (an article or editable video), by its `d` tag, author and kind. */
     data class Address(
         val identifier: String,
         val author: String,
@@ -102,16 +119,21 @@ sealed interface Entity {
 
 /** NIP-19 bech32 entities. */
 object Nip19 {
+    /** A public key as an npub. */
     fun npub(hex: String) = Bech32.encode("npub", Hex.decode(hex))
+    /** A private key as an nsec. */
     fun nsec(key: ByteArray) = Bech32.encode("nsec", key)
+    /** An event id as a note code. */
     fun note(id: String) = Bech32.encode("note", Hex.decode(id))
 
+    /** Writes one type-length-value field. */
     private fun tlv(out: ByteArrayOutputStream, type: Int, value: ByteArray) {
         out.write(type)
         out.write(value.size)
         out.write(value)
     }
 
+    /** An event as an nevent, with up to three relays and the author as hints. */
     fun nevent(id: String, relays: List<String> = emptyList(), author: String? = null): String {
         val out = ByteArrayOutputStream()
         tlv(out, 0, Hex.decode(id))
@@ -120,6 +142,7 @@ object Nip19 {
         return Bech32.encode("nevent", out.toByteArray())
     }
 
+    /** A person as an nprofile, with up to three relays. */
     fun nprofile(pubkey: String, relays: List<String> = emptyList()): String {
         val out = ByteArrayOutputStream()
         tlv(out, 0, Hex.decode(pubkey))
@@ -127,8 +150,10 @@ object Nip19 {
         return Bech32.encode("nprofile", out.toByteArray())
     }
 
+    /** The fields read out of an nevent, nprofile or naddr. */
     private class Tlv(val special: ByteArray?, val relays: List<String>, val author: ByteArray?, val kind: Int?)
 
+    /** Reads type-length-value fields, skipping types it doesn't know. */
     private fun readTlv(data: ByteArray): Tlv {
         var special: ByteArray? = null
         var author: ByteArray? = null
@@ -153,6 +178,7 @@ object Nip19 {
         return Tlv(special, relays, author, kind)
     }
 
+    /** Decodes any NIP-19 code, with or without nostr: in front, or returns null. */
     fun decode(text: String): Entity? = try {
         val (hrp, data) = Bech32.decode(text.removePrefix("nostr:"))
         when (hrp) {

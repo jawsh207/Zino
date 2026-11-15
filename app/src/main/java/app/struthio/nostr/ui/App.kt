@@ -1,3 +1,7 @@
+/*
+ * The app's frame and navigation: the four tabs (Home, Messages, Wallet, Notifications), a stack
+ * of screens on top of them, the back gesture, snackbar messages, and opening nostr: links.
+ */
 package app.struthio.nostr.ui
 
 import android.Manifest
@@ -57,20 +61,35 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
+/** Every screen that can be opened on top of the tabs. */
 sealed interface Screen {
+    /** A post and its replies. */
     data class Thread(val id: String, val relays: List<String> = emptyList(), val author: String? = null) : Screen
+    /** A person's profile. */
     data class Profile(val pubkey: String) : Screen
+    /** Who a person follows, or who follows them. */
     data class People(val pubkey: String, val followers: Boolean) : Screen
+    /** Posts with a hashtag. */
     data class Hashtag(val tag: String) : Screen
+    /** Writing a post, maybe quoting another. */
     data class Compose(val quote: String? = null) : Screen
+    /** A private conversation. */
     data class Chat(val room: String) : Screen
+    /** Starting a new private conversation. */
     data object NewMessage : Screen
+    /** Details about one relay. */
     data class RelayInfo(val url: String) : Screen
+    /** Searching people and posts. */
     data object Search : Screen
+    /** Settings. */
     data object Settings : Screen
+    /** Your relay lists. */
     data object Relays : Screen
+    /** Checking that your profile and relay lists reach your relays. */
     data object AccountCheck : Screen
+    /** Editing your profile. */
     data object EditProfile : Screen
+    /** Your bookmarks. */
     data object Bookmarks : Screen
 }
 
@@ -81,6 +100,7 @@ val LocalScreenActive = compositionLocalOf { true }
 private fun Screen.sameAs(other: Screen): Boolean =
     if (this is Screen.Thread && other is Screen.Thread) id == other.id else this == other
 
+/** The screen stack: open screens, go back, and show short messages. */
 class Nav(private val scope: CoroutineScope, private val snackbar: SnackbarHostState) {
     val stack = mutableStateListOf<Screen>()
 
@@ -101,10 +121,12 @@ class Nav(private val scope: CoroutineScope, private val snackbar: SnackbarHostS
     /** Tapping Home while already there. */
     val homeTapped = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
+    /** Closes the top screen. */
     fun pop() {
         if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex)
     }
 
+    /** Shows a short message at the bottom of the screen, replacing any already showing. */
     fun say(message: String) {
         scope.launch {
             snackbar.currentSnackbarData?.dismiss()
@@ -113,6 +135,7 @@ class Nav(private val scope: CoroutineScope, private val snackbar: SnackbarHostS
     }
 }
 
+/** A tab in the bottom bar, with its icons when chosen and not. */
 private class Tab(val label: String, val on: ImageVector, val off: ImageVector)
 
 private val TABS = listOf(
@@ -122,6 +145,9 @@ private val TABS = listOf(
     Tab("Notifications", Icons.Rounded.Notifications, Icons.Outlined.NotificationsNone),
 )
 
+/**
+ * The whole app: sign-in when signed out, otherwise the tabs, the screen stack and the bottom bar.
+ */
 @Composable
 fun App(core: Core, deepLink: MutableStateFlow<String?>) {
     val snackbar = remember { SnackbarHostState() }

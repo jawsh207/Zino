@@ -1,3 +1,8 @@
+/*
+ * Notifications without a push service: Android runs a short check every so often (JobScheduler),
+ * Zino connects, looks for new replies, mentions, zaps and messages, shows notifications, and
+ * disconnects. Message notifications never include who sent them or what they say.
+ */
 package app.struthio.nostr.data
 
 import android.app.Notification
@@ -33,6 +38,7 @@ object Notifier {
     private const val SUMMARY_ID = 100
     private const val MESSAGES_ID = 101
 
+    /** Sets how often the check runs, in minutes; 0 turns checks off. */
     fun schedule(context: Context, minutes: Int) {
         // Notifications must never get in the way of the account itself.
         try {
@@ -56,11 +62,13 @@ object Notifier {
         }
     }
 
+    /** Creates the two notification channels: activity, and private messages. */
     private fun channels(manager: NotificationManager) {
         manager.createNotificationChannel(NotificationChannel(ACTIVITY, "Activity", NotificationManager.IMPORTANCE_DEFAULT))
         manager.createNotificationChannel(NotificationChannel(MESSAGES, "Private messages", NotificationManager.IMPORTANCE_HIGH))
     }
 
+    /** What tapping a notification opens: the post it's about, or just the app. */
     private fun open(context: Context, id: Int, target: String?): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             action = Intent.ACTION_VIEW
@@ -69,6 +77,7 @@ object Notifier {
         return PendingIntent.getActivity(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 
+    /** A notification in Zino's style, cleared when tapped. */
     private fun builder(context: Context, channel: String) = Notification.Builder(context, channel)
         .setSmallIcon(R.drawable.ic_notification)
         .setAutoCancel(true)
@@ -109,14 +118,17 @@ object Notifier {
         }
     }
 
+    /** Removes all of Zino's notifications. */
     fun clear(context: Context) {
         context.getSystemService(NotificationManager::class.java).cancelAll()
     }
 }
 
+/** The job Android runs for each check. */
 class CheckService : JobService() {
     private var work: Job? = null
 
+    /** Runs one check in the background and tells Android when it's done. */
     override fun onStartJob(params: JobParameters): Boolean {
         val core = (application as ZinoApp).core
         work = core.scope.launch {
@@ -131,6 +143,7 @@ class CheckService : JobService() {
         return true
     }
 
+    /** Android ran out of time for the check: stop it and try again later. */
     override fun onStopJob(params: JobParameters): Boolean {
         work?.cancel()
         return true

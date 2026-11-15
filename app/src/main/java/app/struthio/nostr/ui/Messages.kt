@@ -1,3 +1,7 @@
+/*
+ * Private messages (NIP-17): the list of conversations, and the chat screen with bubbles grouped
+ * by day, pictures and files, replies, emoji reactions, invoices and quoted posts.
+ */
 package app.struthio.nostr.ui
 
 import androidx.compose.foundation.clickable
@@ -101,6 +105,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** The Messages tab: your conversations, newest first, and a button to start a new one. */
 @Composable
 fun MessagesScreen() {
     val core = LocalCore.current
@@ -186,6 +191,7 @@ fun NewMessageScreen() {
     }
 }
 
+/** One conversation in the list: who it's with, the latest message, and how many are unread. */
 @Composable
 private fun RoomRow(room: Room, unread: Int, shape: Shape, onClick: () -> Unit) {
     val core = LocalCore.current
@@ -213,6 +219,7 @@ private fun RoomRow(room: Room, unread: Int, shape: Shape, onClick: () -> Unit) 
     )
 }
 
+/** One conversation: its messages, and the composer with reply, picture and file buttons. */
 @Composable
 fun ChatScreen(room: String) {
     val core = LocalCore.current
@@ -230,6 +237,7 @@ fun ChatScreen(room: String) {
     var acting by remember { mutableStateOf<Dm?>(null) }
     var picking by remember { mutableStateOf<Dm?>(null) }
     val clipboard = LocalClipboardManager.current
+    /** Sends a reaction to a message. */
     fun react(dm: Dm, emoji: String) {
         // One of each emoji per person: tapping a reaction you've already sent does nothing.
         if (reactions[dm.id].orEmpty().any { it.sender == me && it.content == emoji }) return
@@ -243,6 +251,7 @@ fun ChatScreen(room: String) {
     // Reading the conversation is what makes it read, including anything that arrives while it's open.
     LaunchedEffect(messages) { messages.firstOrNull()?.let { core.readRoom(room, it.createdAt) } }
 
+    /** Encrypts and uploads a picked file, then sends it as a file message (kind 15). */
     fun attach(uri: Uri?) {
         if (uri == null) return
         sending = true
@@ -434,6 +443,10 @@ private fun ReplyQuote(dm: Dm?, modifier: Modifier = Modifier, onClick: (() -> U
     }
 }
 
+/**
+ * One message bubble, with its reply quote, text or file, and reactions underneath. A long press
+ * opens its actions.
+ */
 @Composable
 private fun Bubble(
     dm: Dm,
@@ -517,8 +530,10 @@ private fun Bubble(
     }
 }
 
+/** The calendar day of a time, for grouping messages. */
 private fun dayOf(createdAt: Long): String = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date(createdAt * 1000))
 
+/** The date shown between messages from different days. */
 @Composable
 private fun DateDivider(createdAt: Long) {
     val thisYear = dayOf(System.currentTimeMillis() / 1000).take(4) == dayOf(createdAt).take(4)

@@ -1,3 +1,7 @@
+/*
+ * QR codes: scanning them with the camera, for things like wallet links and npubs, and drawing
+ * them, for your profile and invoices.
+ */
 package app.struthio.nostr.ui
 
 import android.Manifest
@@ -90,6 +94,7 @@ private class QrCamera(
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
 
+    /** Looks for a QR code in the latest camera frame. */
     private fun decode() {
         val image = reader.acquireLatestImage() ?: return
         try {
@@ -114,10 +119,12 @@ private class QrCamera(
         }
     }
 
+    /** The back camera, if there is one. */
     private fun backCamera(manager: CameraManager): String? = manager.cameraIdList.firstOrNull {
         manager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
     } ?: manager.cameraIdList.firstOrNull()
 
+    /** Opens the back camera. */
     @SuppressLint("MissingPermission")
     fun start() {
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
@@ -126,13 +133,16 @@ private class QrCamera(
             texture.setDefaultBufferSize(WIDTH, HEIGHT)
             reader.setOnImageAvailableListener({ decode() }, handler)
             manager.openCamera(id, object : CameraDevice.StateCallback() {
+                /** The camera opened: start the preview. */
                 override fun onOpened(camera: CameraDevice) {
                     device = camera
                     begin(camera)
                 }
 
+                /** Another app took the camera. */
                 override fun onDisconnected(camera: CameraDevice) = camera.close()
 
+                /** The camera failed. */
                 override fun onError(camera: CameraDevice, error: Int) {
                     camera.close()
                     onError()
@@ -143,11 +153,13 @@ private class QrCamera(
         }
     }
 
+    /** Sends camera frames to the preview and to the QR reader. */
     @Suppress("DEPRECATION")
     private fun begin(camera: CameraDevice) {
         val preview = Surface(texture)
         try {
             camera.createCaptureSession(listOf(preview, reader.surface), object : CameraCaptureSession.StateCallback() {
+                /** Starts showing frames. */
                 override fun onConfigured(capture: CameraCaptureSession) {
                     session = capture
                     runCatching {
@@ -160,6 +172,7 @@ private class QrCamera(
                     }
                 }
 
+                /** The camera couldn't be set up. */
                 override fun onConfigureFailed(capture: CameraCaptureSession) = onError()
             }, handler)
         } catch (_: Exception) {
@@ -167,6 +180,7 @@ private class QrCamera(
         }
     }
 
+    /** Closes the camera. */
     fun stop() {
         finished.set(true)
         handler.post {
@@ -183,6 +197,7 @@ private class QrCamera(
     }
 }
 
+/** The camera's view, calling [onCode] with the first QR code it sees. */
 @Composable
 private fun CameraPreview(onCode: (String) -> Unit, onError: () -> Unit) {
     val context = LocalContext.current
@@ -194,12 +209,16 @@ private fun CameraPreview(onCode: (String) -> Unit, onError: () -> Unit) {
         factory = {
             TextureView(it).apply {
                 surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                    /** The preview is ready: open the camera. */
                     override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
                         camera.value = QrCamera(context, surface, onCode, onError).also(QrCamera::start)
                     }
 
+                    /** Nothing to do when the preview is resized. */
                     override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) = Unit
+                    /** The preview is gone: release it. */
                     override fun onSurfaceTextureDestroyed(surface: SurfaceTexture) = true
+                    /** Nothing to do on each frame. */
                     override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
                 }
             }
@@ -251,6 +270,7 @@ fun QrScanner(onResult: (String) -> Unit, onClose: () -> Unit) {
     }
 }
 
+/** A button that opens the scanner and hands back what it reads. */
 @Composable
 fun ScanButton(onResult: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
@@ -263,6 +283,7 @@ fun ScanButton(onResult: (String) -> Unit) {
     }
 }
 
+/** A QR code for [text]. */
 @Composable
 fun QrImage(text: String, size: Dp = 260.dp) {
     val matrix: BitMatrix = remember(text) {

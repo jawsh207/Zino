@@ -1,3 +1,8 @@
+/*
+ * A small Markdown reader for long-form articles (NIP-23). It turns article text into blocks
+ * (headings, paragraphs, quotes, lists, code, images, rules) and styled runs of text, which the
+ * article screen then draws.
+ */
 package app.struthio.nostr.core
 
 /**
@@ -5,16 +10,25 @@ package app.struthio.nostr.core
  * Blocks first, then the inline styling inside each.
  */
 object Markdown {
+    /** One block of an article, top to bottom. */
     sealed interface Block {
+        /** A heading, level 1 to 6. */
         data class Heading(val level: Int, val text: List<Span>) : Block
+        /** A paragraph of styled text. */
         data class Paragraph(val text: List<Span>) : Block
+        /** A quoted passage. */
         data class Quote(val text: List<Span>) : Block
+        /** A list item, with its bullet or number and how deeply it's nested. */
         data class Item(val marker: String, val depth: Int, val text: List<Span>) : Block
+        /** A block of code, shown as written. */
         data class Code(val text: String) : Block
+        /** An image on a line of its own. */
         data class Image(val url: String, val alt: String) : Block
+        /** A horizontal rule. */
         data object Rule : Block
     }
 
+    /** A run of text with one style: bold, italic, code, struck through, or a link. */
     data class Span(
         val text: String,
         val bold: Boolean = false,
@@ -32,11 +46,13 @@ object Markdown {
     private val image = Regex("""^!\[([^\]]*)]\((\S+?)(?:\s+"[^"]*")?\)\s*$""")
     private val fence = Regex("""^\s*(```|~~~)""")
 
+    /** Splits article text into blocks, line by line. */
     fun parse(source: String): List<Block> {
         val blocks = ArrayList<Block>()
         val paragraph = ArrayList<String>()
         val lines = source.replace("\r\n", "\n").split('\n')
 
+        /** Ends the paragraph being gathered, if there is one. */
         fun flush() {
             if (paragraph.isNotEmpty()) {
                 blocks += Block.Paragraph(inline(paragraph.joinToString(" ") { it.trim() }))
@@ -101,6 +117,7 @@ object Markdown {
         return blocks
     }
 
+    /** How deeply a list item is nested, from its indent: two spaces a level, at most three. */
     private fun depthOf(indent: String) = (indent.replace("\t", "    ").length / 2).coerceAtMost(3)
 
     /** Inline styling: **bold**, *italic* or _italic_, `code`, ~~strike~~, [text](url), bare and nostr: links. */
@@ -111,6 +128,10 @@ object Markdown {
         var italic = false
         var strike = false
 
+        /**
+         * Ends the run of text being gathered, with the styles in force, and adds [span] after it
+         * if given.
+         */
         fun emit(span: Span? = null) {
             if (buffer.isNotEmpty()) {
                 out += Span(buffer.toString(), bold, italic, strike = strike)
@@ -187,6 +208,7 @@ object Markdown {
         return out
     }
 
+    /** The position of the first character from [from] on that passes [test], or -1. */
     private inline fun String.indexOfFirst(from: Int, test: (Char) -> Boolean): Int {
         for (j in from until length) if (test(this[j])) return j
         return -1

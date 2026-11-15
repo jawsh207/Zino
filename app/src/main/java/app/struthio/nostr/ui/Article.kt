@@ -1,3 +1,7 @@
+/*
+ * Long-form articles (NIP-23): a card for feeds, with title, image and reading time, and the full
+ * article, written in Markdown, for reading.
+ */
 package app.struthio.nostr.ui
 
 import android.content.Intent
@@ -122,6 +126,7 @@ fun ArticleBody(event: Event) {
     }
 }
 
+/** One block of an article: a heading, paragraph, quote, list, code, image or rule. */
 @Composable
 private fun MarkdownBlock(block: Markdown.Block) {
     val body = TextStyle(fontSize = 16.sp, lineHeight = 25.sp)

@@ -1,3 +1,7 @@
+/*
+ * The Notifications tab: replies, mentions, reactions, boosts and zaps from other people, newest
+ * first, with unread ones marked.
+ */
 package app.struthio.nostr.ui
 
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +33,7 @@ import app.struthio.nostr.core.Kind
 import app.struthio.nostr.core.emojiMap
 import app.struthio.nostr.data.Alert
 
+/** The notifications list, with a button to mark everything read. */
 @Composable
 fun AlertsScreen() {
     val core = LocalCore.current
@@ -53,6 +58,7 @@ fun AlertsScreen() {
     }
 }
 
+/** One notification: who did what, a glimpse of the post, and when. Tapping opens the post. */
 @Composable
 private fun AlertRow(alert: Alert, unread: Boolean, shape: Shape) {
     val core = LocalCore.current

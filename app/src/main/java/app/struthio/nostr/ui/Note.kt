@@ -1,3 +1,8 @@
+/*
+ * How a post looks everywhere: its header, its text with working links, mentions and custom emoji,
+ * its pictures, videos, polls, invoices and quoted posts, a content warning when there is one, and
+ * the buttons to reply, boost, react and zap.
+ */
 package app.struthio.nostr.ui
 
 import android.content.Intent
@@ -110,6 +115,7 @@ fun FeedItem(event: Event, modifier: Modifier = Modifier, shape: Shape = Rounded
     }
 }
 
+/** A post as a card in a feed, with its header, body and buttons. Tapping it opens the thread. */
 @Composable
 fun NoteCard(
     event: Event,
@@ -140,6 +146,7 @@ fun NoteCard(
     }
 }
 
+/** The line above a boosted post saying who boosted it. */
 @Composable
 private fun BoostLine(pubkey: String) {
     val core = LocalCore.current
@@ -160,6 +167,7 @@ private fun BoostLine(pubkey: String) {
     }
 }
 
+/** The author's picture, name, Nostr address and how long ago the post was made. */
 @Composable
 fun NoteHeader(event: Event) {
     val core = LocalCore.current
@@ -198,6 +206,10 @@ fun NoteHeader(event: Event) {
     }
 }
 
+/**
+ * A post's text cut into parts, with what goes under it: pictures, videos, quotes, a link preview,
+ * a poll and invoices.
+ */
 private class Body(
     val parts: List<Part>,
     val images: List<Media>,
@@ -210,6 +222,7 @@ private class Body(
     val invoices: List<Invoice>,
 )
 
+/** A post's content, hidden behind a button when it has a content warning (NIP-36). */
 @Composable
 fun NoteBody(event: Event, detail: Boolean = false, inQuote: Boolean = false) {
     val warning = event.tags.firstOrNull { it.firstOrNull() == "content-warning" }
@@ -236,6 +249,7 @@ fun NoteBody(event: Event, detail: Boolean = false, inQuote: Boolean = false) {
     NoteContent(event, detail, inQuote)
 }
 
+/** A post's text and everything shown under it. */
 @Composable
 private fun NoteContent(event: Event, detail: Boolean, inQuote: Boolean) {
     val core = LocalCore.current
@@ -320,6 +334,7 @@ private fun NoteContent(event: Event, detail: Boolean, inQuote: Boolean) {
     }
 }
 
+/** A post or article quoted inside another, as a small card. */
 @Composable
 internal fun QuoteCard(ref: Entity) {
     val core = LocalCore.current
@@ -405,6 +420,7 @@ private fun RowScope.ActionButton(
     }
 }
 
+/** The reply, boost, react and zap buttons with their counts. */
 @Composable
 private fun Actions(event: Event, onReply: ((Event) -> Unit)? = null) {
     val core = LocalCore.current
@@ -470,8 +486,10 @@ private fun Actions(event: Event, onReply: ((Event) -> Unit)? = null) {
     }
 }
 
+/** A count for a button, blank when zero. */
 private fun count(n: Long) = if (n > 0) compact(n) else ""
 
+/** Choosing how many sats to zap, with an optional message. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ZapSheet(event: Event?, recipient: String, onDismiss: () -> Unit) {
@@ -529,6 +547,7 @@ fun ZapSheet(event: Event?, recipient: String, onDismiss: () -> Unit) {
     }
 }
 
+/** Makes anything tappable. */
 fun Modifier.tap(onClick: () -> Unit) = clickable(onClick = onClick)
 
 /**

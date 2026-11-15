@@ -1,3 +1,8 @@
+/*
+ * Keeping secrets safe on the phone, and signing through a signer app. Private keys are encrypted
+ * with a key held in Android's hardware Keystore. Signer apps like Amber are reached with NIP-55:
+ * quietly when the app allows it, otherwise by opening it for approval.
+ */
 package app.struthio.nostr.data
 
 import android.content.Context
@@ -23,6 +28,7 @@ import javax.crypto.spec.GCMParameterSpec
 class SecureStore(context: Context) {
     private val prefs = context.getSharedPreferences("secure", Context.MODE_PRIVATE)
 
+    /** The Keystore key that protects stored secrets, created the first time. */
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey(ALIAS, null) as? SecretKey)?.let { return it }
@@ -37,6 +43,7 @@ class SecureStore(context: Context) {
         return generator.generateKey()
     }
 
+    /** Stores a secret, encrypted. */
     fun put(name: String, value: ByteArray) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key())
@@ -44,6 +51,7 @@ class SecureStore(context: Context) {
         prefs.edit().putString(name, Base64.getEncoder().encodeToString(sealed)).apply()
     }
 
+    /** Reads a stored secret back, or null if there isn't one. */
     fun get(name: String): ByteArray? {
         val sealed = Base64.getDecoder().decode(prefs.getString(name, null) ?: return null)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -51,6 +59,7 @@ class SecureStore(context: Context) {
         return cipher.doFinal(sealed, 12, sealed.size - 12)
     }
 
+    /** Deletes a stored secret. */
     fun remove(name: String) {
         prefs.edit().remove(name).apply()
     }
@@ -68,6 +77,7 @@ object SignerBridge {
     var launch: ((android.content.Intent, CompletableDeferred<SignerResult>) -> Unit)? = null
     private val mutex = Mutex()
 
+    /** Opens the signer app with a request and waits for its answer. One request at a time. */
     suspend fun request(intent: android.content.Intent): SignerResult = mutex.withLock {
         val launcher = launch ?: error("open Zino to approve this")
         val deferred = CompletableDeferred<SignerResult>()
@@ -83,6 +93,10 @@ class ExternalSigner(
     private val packageName: String,
 ) : Signer {
 
+    /**
+     * Asks the signer app without opening it, through its content provider. Null if it wants to ask
+     * the user first.
+     */
     private fun resolve(type: String, payload: String, peer: String): Pair<String?, String?>? = try {
         context.contentResolver.query(
             Uri.parse("content://$packageName.$type"),
@@ -105,6 +119,7 @@ class ExternalSigner(
         null
     }
 
+    /** Opens the signer app so the user can approve a request. */
     private suspend fun ask(method: String, payload: String, peer: String?): SignerResult {
         val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("nostrsigner:" + Uri.encode(payload))).apply {
             `package` = packageName
@@ -118,6 +133,10 @@ class ExternalSigner(
         return reply
     }
 
+    /**
+     * Signs through the signer app: quietly if allowed, otherwise by asking. In the background it
+     * can't ask, so it fails instead.
+     */
     override suspend fun sign(draft: Draft, background: Boolean): Event = withContext(Dispatchers.IO) {
         val json = draft.toJson()
         val signature = resolve("SIGN_EVENT", json, "")?.first
@@ -127,12 +146,14 @@ class ExternalSigner(
         event
     }
 
+    /** Encrypts through the signer app. */
     override suspend fun nip44Encrypt(plaintext: String, peer: String): String = withContext(Dispatchers.IO) {
         resolve("NIP44_ENCRYPT", plaintext, peer)?.first
             ?: ask("nip44_encrypt", plaintext, peer).result
             ?: error("no ciphertext")
     }
 
+    /** Decrypts through the signer app; in the background only if quiet decryption is allowed. */
     override suspend fun nip44Decrypt(payload: String, peer: String, background: Boolean): String = withContext(Dispatchers.IO) {
         resolve("NIP44_DECRYPT", payload, peer)?.first
             ?: if (background) {
@@ -143,6 +164,7 @@ class ExternalSigner(
     }
 
     companion object {
+        /** True if a NIP-55 signer app is installed. */
         fun isInstalled(context: Context): Boolean {
             val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("nostrsigner:"))
             return context.packageManager.queryIntentActivities(intent, 0).isNotEmpty()

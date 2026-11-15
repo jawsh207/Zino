@@ -1,3 +1,10 @@
+/*
+ * The rest of the Nostr protocol, as plain functions: threads (NIP-10, NIP-22), reading note text
+ * into links, hashtags and mentions (NIP-27), images and videos (NIP-92), Lightning invoices and
+ * zap receipts (NIP-57), wallet links (NIP-47), relay lists (NIP-65) and relay details (NIP-11),
+ * custom emoji (NIP-30), polls (NIP-88), encrypted files in private messages (NIP-17), link
+ * previews and video embeds, and a few small helpers.
+ */
 package app.struthio.nostr.core
 
 import org.json.JSONArray
@@ -9,6 +16,10 @@ import java.net.URLDecoder
 /** NIP-10 and NIP-22: where a note sits in a thread. */
 data class ThreadRef(val root: String?, val parent: String?, val rootAuthor: String? = null, val parentAuthor: String? = null)
 
+/**
+ * Works out the thread root and the parent of a note or comment, from its tags. Comments name their
+ * root with capital tags, notes with `root`/`reply` markers or, in older notes, by tag order.
+ */
 fun threadRef(event: Event): ThreadRef {
     if (event.kind == Kind.COMMENT) {
         // A comment on an article or editable video may name its root only by address (A).
@@ -62,10 +73,15 @@ fun replyTags(parent: Event, hint: String): Pair<Int, Tags> {
 
 /** Parts of a note body. */
 sealed interface Part {
+    /** Plain text. */
     data class Text(val text: String) : Part
+    /** A web link. */
     data class Link(val url: String) : Part
+    /** A hashtag. */
     data class Tag(val tag: String) : Part
+    /** A nostr: link to a person, post or article. */
     data class Mention(val raw: String, val entity: Entity) : Part
+    /** A Lightning invoice written into the text. */
     data class Lightning(val invoice: Invoice) : Part
 }
 
@@ -79,9 +95,11 @@ private val TOKEN = Regex(
         """|(?<![\p{L}\p{N}_/&#])#[\p{L}\p{N}_]+""",
 )
 
+/** Splits note text into its parts, in order: text, links, hashtags, mentions and invoices. */
 fun parseContent(content: String): List<Part> {
     val parts = ArrayList<Part>()
     var index = 0
+    /** Adds the plain text up to [end] as a part. */
     fun text(end: Int) {
         if (end > index) parts += Part.Text(content.substring(index, end))
     }
@@ -143,6 +161,7 @@ fun prepareContent(text: String): Pair<String, Tags> {
 
 private val IMAGE_EXT = Regex(""".*\.(jpe?g|png|webp|gif|avif)(\?.*)?$""", RegexOption.IGNORE_CASE)
 
+/** An image or video address, with its shape if the post gives one. */
 data class Media(val url: String, val aspect: Float?)
 
 /** Images in a note: NIP-92 imeta first, then URLs that look like images. */
@@ -192,12 +211,14 @@ private const val DEFAULT_EXPIRY = 3600L
 private const val TAG_DESCRIPTION = 13
 private const val TAG_EXPIRY = 6
 
+/** Every valid Lightning invoice in the text. */
 fun invoicesIn(text: String): List<Invoice> = INVOICE.findAll(text).mapNotNull { parseInvoice(it.value) }.toList()
 
 /** The text with each invoice swapped for [with], leaving anything that only looks like one. */
 fun replaceInvoices(text: String, with: (Invoice) -> String): String =
     INVOICE.replace(text) { match -> parseInvoice(match.value)?.let(with) ?: match.value }
 
+/** An amount in sats, with thousands separators, and decimals only when there are millisats. */
 fun formatSats(msats: Long): String =
     if (msats % 1000 == 0L) "%,d sats".format(Locale.US, msats / 1000) else "%,.3f sats".format(Locale.US, msats / 1000.0)
 
@@ -213,6 +234,7 @@ fun parseInvoice(raw: String): Invoice? {
     if (!Regex("lnbc(\\d+[munp]?)?").matches(hrp) || words.size < TIMESTAMP_WORDS + SIGNATURE_WORDS) return null
     val digits = hrp.removePrefix("lnbc")
     val msats = if (digits.isEmpty()) null else bolt11Msats(text) ?: return null
+    /** Reads [count] 5-bit words from [from] as one number. */
     fun number(from: Int, count: Int): Long {
         var value = 0L
         for (i in from until from + count) value = value * 32 + words[i]
@@ -268,6 +290,7 @@ data class Zap(
     val createdAt: Long,
 )
 
+/** A zap from its receipt, after checking the receipt really carries a zap request. */
 fun parseZapReceipt(event: Event): Zap? {
     if (event.kind != Kind.ZAP_RECEIPT) return null
     val request = Event.parse(event.tags.value("description") ?: return null) ?: return null
@@ -301,6 +324,7 @@ fun zapSplits(event: Event): List<Pair<String, Double>> {
 /** A parsed nostr+walletconnect:// URI. */
 class NwcUri(val wallet: String, val relays: List<String>, val secret: ByteArray, val lud16: String?) {
     companion object {
+        /** A wallet's connection link (nostr+walletconnect://), or null if it's missing a part. */
         fun parse(text: String): NwcUri? = try {
             val uri = URI(text.trim().replace("nostr+walletconnect:", "nwc:"))
             require(uri.scheme == "nwc")
@@ -319,12 +343,14 @@ class NwcUri(val wallet: String, val relays: List<String>, val secret: ByteArray
     }
 }
 
+/** A wallet request's JSON: the method and its parameters. */
 fun nwcRequestJson(method: String, params: JSONObject = JSONObject()): String =
     JSONObject().put("method", method).put("params", params).toString()
 
 /** NIP-65: which relays a kind 10002 event declares. */
 data class RelayList(val read: List<String>, val write: List<String>)
 
+/** The relays a NIP-65 list says to read from and write to. */
 fun parseRelayList(event: Event): RelayList {
     val read = ArrayList<String>()
     val write = ArrayList<String>()
@@ -343,6 +369,10 @@ fun parseRelayList(event: Event): RelayList {
     return RelayList(read.distinct(), write.distinct())
 }
 
+/**
+ * A relay address in one standard form, so the same relay isn't counted twice, or null if it isn't
+ * a wss:// address.
+ */
 fun normalizeRelay(url: String): String? {
     val u = url.trim().trimEnd('/').lowercase()
     if (!u.startsWith("wss://") || u.length < 9) return null
@@ -379,12 +409,16 @@ data class RelayInfo(
         }
 }
 
+/** A relay's NIP-11 details: name, description, operator, software, limits and fees. */
 fun parseRelayInfo(json: String): RelayInfo? = runCatching {
     val o = JSONObject(json)
+    /** A text field, or null if it's blank. */
     fun text(from: JSONObject, name: String) = from.optString(name).takeIf { it.isNotBlank() && it != "null" }
+    /** A yes/no field, or null if the relay doesn't say. */
     fun flag(from: JSONObject, name: String) = if (from.has(name)) from.optBoolean(name) else null
     val limits = o.optJSONObject("limitation") ?: JSONObject()
     val fees = o.optJSONObject("fees") ?: JSONObject()
+    /** A relay's fees of one kind, as lines of text. */
     fun feeLines(group: String, label: String) = fees.optJSONArray(group)?.let { list ->
         (0 until list.length()).mapNotNull { list.optJSONObject(it) }.map { "$label: " + feeText(it) }
     }.orEmpty()
@@ -410,6 +444,7 @@ fun parseRelayInfo(json: String): RelayInfo? = runCatching {
     )
 }.getOrNull()
 
+/** One fee as text, like "21 sats a month". */
 private fun feeText(fee: JSONObject): String {
     val amount = fee.optLong("amount")
     val unit = fee.optString("unit").lowercase()
@@ -468,6 +503,7 @@ fun splitEmoji(text: String, emoji: Map<String, String>): List<Pair<String, Bool
     return out
 }
 
+/** The text with its custom emoji shortcodes left out. */
 fun stripEmoji(text: String, emoji: Map<String, String>): String =
     splitEmoji(text, emoji).filterNot { it.second }.joinToString("") { it.first }.trim()
 
@@ -475,6 +511,7 @@ fun stripEmoji(text: String, emoji: Map<String, String>): String =
 fun customGlyph(content: String, tags: Tags): String? =
     content.takeIf { EMOJI_CODE.matches(it) && content.trim(':') in emojiMap(tags) }
 
+/** One choice in a poll. */
 data class PollOption(val id: String, val label: String)
 
 /** NIP-88. */
@@ -485,6 +522,7 @@ data class Poll(
     val endsAt: Long?,
 )
 
+/** A poll's question, choices, end time and relays, or null if [event] isn't a poll. */
 fun parsePoll(event: Event): Poll? {
     if (event.kind != Kind.POLL) return null
     val options = event.tags.filter { it.size >= 3 && it[0] == "option" }.map { PollOption(it[1], it[2]) }.distinctBy { it.id }
@@ -497,6 +535,10 @@ fun parsePoll(event: Event): Poll? {
     )
 }
 
+/**
+ * The votes counted: for each choice, how many picked it, how many voted, and which choices you
+ * picked.
+ */
 data class PollResult(val counts: Map<String, Int>, val voters: Int, val mine: Set<String>)
 
 /** One vote per person, their latest within the poll's time. */
@@ -515,6 +557,10 @@ fun countVotes(poll: Poll, votes: List<Event>, me: String?): PollResult {
     return PollResult(counts, choices.size, me?.let { choices[it] }.orEmpty())
 }
 
+/**
+ * The tags for a new poll: its choices with random ids, the relays to vote on, single or multiple
+ * choice, and when it ends.
+ */
 fun pollTags(options: List<String>, multiple: Boolean, endsAt: Long?, relays: List<String>): Tags = buildList {
     options.forEach { add(listOf("option", Hex.encode(randomBytes(5)), it)) }
     relays.forEach { add(listOf("relay", it)) }
@@ -564,6 +610,10 @@ data class FileMessage(
     val aspect: Float?,
 )
 
+/**
+ * An encrypted file sent in a private message (kind 15), or null if it's missing what's needed to
+ * open it.
+ */
 fun parseFileMessage(rumor: Draft): FileMessage? {
     if (rumor.kind != Kind.FILE_DM) return null
     if (rumor.tags.value("encryption-algorithm") != "aes-gcm") return null
@@ -578,10 +628,12 @@ fun parseFileMessage(rumor: Draft): FileMessage? {
     )
 }
 
+/** A file message as JSON, for keeping in the database. */
 fun fileToJson(file: FileMessage): String = JSONObject()
     .put("url", file.url).put("type", file.type).put("key", file.key).put("nonce", file.nonce)
     .put("hash", file.hash ?: "").put("aspect", (file.aspect ?: 0f).toDouble()).toString()
 
+/** A file message back from JSON. */
 fun fileFromJson(json: String): FileMessage? = runCatching {
     val o = JSONObject(json)
     FileMessage(
@@ -592,14 +644,17 @@ fun fileFromJson(json: String): FileMessage? = runCatching {
 
 /** AES-GCM for kind 15 attachments; the tag sits at the end of the ciphertext. */
 object FileCipher {
+    /** An AES-GCM cipher set up to encrypt or decrypt with this key and nonce. */
     private fun cipher(mode: Int, key: ByteArray, nonce: ByteArray) =
         javax.crypto.Cipher.getInstance("AES/GCM/NoPadding").apply {
             init(mode, javax.crypto.spec.SecretKeySpec(key, "AES"), javax.crypto.spec.GCMParameterSpec(128, nonce))
         }
 
+    /** Encrypts a file for sending. */
     fun encrypt(plain: ByteArray, key: ByteArray, nonce: ByteArray): ByteArray =
         cipher(javax.crypto.Cipher.ENCRYPT_MODE, key, nonce).doFinal(plain)
 
+    /** Decrypts a received file; throws if it was changed. */
     fun decrypt(data: ByteArray, key: ByteArray, nonce: ByteArray): ByteArray =
         cipher(javax.crypto.Cipher.DECRYPT_MODE, key, nonce).doFinal(data)
 }
@@ -663,6 +718,7 @@ fun mediaKind(contentType: String): String? = when {
 private val META_TAG = Regex("""<meta\s[^>]*>""", RegexOption.IGNORE_CASE)
 private val TITLE_TAG = Regex("""<title[^>]*>([^<]{1,300})</title>""", RegexOption.IGNORE_CASE)
 
+/** The value of one attribute in an HTML tag. */
 private fun attribute(tag: String, name: String): String? =
     Regex("""\b$name\s*=\s*("([^"]*)"|'([^']*)')""", RegexOption.IGNORE_CASE).find(tag)
         ?.let { it.groupValues[2].ifEmpty { it.groupValues[3] } }
@@ -710,6 +766,7 @@ fun videoEmbed(url: String): VideoEmbed? = runCatching {
     val query = uri.rawQuery.orEmpty().split('&').mapNotNull { part ->
         part.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] }
     }.toMap()
+    /** The video's id in a YouTube-style link, wherever that kind of link puts it. */
     fun youtubeId(): String? = when {
         host == "youtu.be" -> segments.firstOrNull()
         segments.firstOrNull() == "watch" -> query["v"]
@@ -745,12 +802,17 @@ fun videoEmbed(url: String): VideoEmbed? = runCatching {
     }
 }.getOrNull()
 
+/** How a video site is named on its card. */
 private fun frontendName(host: String): String = when {
     "piped" in host -> "Piped · $host"
     "invidious" in host || host in setOf("yewtu.be", "inv.nadeko.net", "inv.tux.pizza") || host.startsWith("inv.") || host.startsWith("iv.") -> "Invidious · $host"
     else -> host.removePrefix("www.")
 }
 
+/**
+ * True for public https addresses Zino may fetch a preview from; local network addresses are never
+ * fetched.
+ */
 fun isPreviewable(url: String): Boolean = runCatching {
     val host = URI(url).host?.lowercase() ?: return false
     url.startsWith("https://") && host.contains('.') && !host.endsWith(".local") && !host.endsWith(".lan") &&
@@ -767,9 +829,12 @@ fun trustedNetwork(me: String, follows: Set<String>, theirLists: Collection<Coll
     return counts.filterValues { it >= threshold }.keys + follows + me
 }
 
+/** The tags for a NIP-56 report of [event]: the person and the post, with the reason. */
 fun reportTags(event: Event, type: String): Tags =
     listOf(listOf("p", event.pubkey, type), listOf("e", event.id, type))
 
+/** Everyone in a private chat: the sender and everyone the message is addressed to (NIP-17). */
 fun roomOf(rumor: Draft): Set<String> = (rumor.tags.values("p") + rumor.pubkey).toSet()
 
+/** Strings as a JSON array. */
 fun jsonStrings(values: Collection<String>): JSONArray = JSONArray().also { a -> values.forEach { a.put(it) } }

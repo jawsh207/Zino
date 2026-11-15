@@ -1,3 +1,9 @@
+/*
+ * Feeds: one scrolling list of posts. A feed shows what's already stored at once, then asks the
+ * right relays for newer posts and keeps listening, and loads older posts as you scroll. Each kind
+ * of feed (Following, Global, a profile, a hashtag and so on) decides which relays to ask and what
+ * to keep.
+ */
 package app.struthio.nostr.data
 
 import app.struthio.nostr.core.Event
@@ -13,14 +19,23 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
+/** Where a feed's posts come from. */
 sealed interface FeedSource {
+    /** Posts by people you follow, from the relays they write to. */
     data object Following : FeedSource
+    /** Popular posts, from a relay that ranks them. */
     data object Trending : FeedSource
+    /** Everything on Zino's default relays. */
     data object Global : FeedSource
+    /** Everything on your own read relays. */
     data object MyRelays : FeedSource
+    /** One person's posts, replies and boosts. */
     data class Author(val pubkey: String) : FeedSource
+    /** Posts with a hashtag. */
     data class Hashtag(val tag: String) : FeedSource
+    /** A text search, on relays that support it (NIP-50). */
     data class Search(val query: String) : FeedSource
+    /** Posts you've bookmarked. */
     data object Bookmarks : FeedSource
 }
 
@@ -45,6 +60,7 @@ class Feed(private val core: Core, private val source: FeedSource) {
     private val filtered: Boolean
         get() = (source == FeedSource.Global || source == FeedSource.Trending) && core.trustFilterActive()
 
+    /** Shows stored posts, then subscribes to relays. Does nothing if already started. */
     fun start() {
         if (started) return
         started = true
@@ -60,6 +76,7 @@ class Feed(private val core: Core, private val source: FeedSource) {
         }
     }
 
+    /** Closes the feed's relay subscriptions. */
     fun stop() {
         subs.forEach(core.pool::close)
         subs.clear()
@@ -67,11 +84,13 @@ class Feed(private val core: Core, private val source: FeedSource) {
         started = false
     }
 
+    /** Starts the feed afresh, as pull to refresh does. */
     fun refresh() {
         stop()
         start()
     }
 
+    /** Fills the list from the database straight away, before any relay answers. */
     private fun preload() {
         val now = nowSeconds() + 60
         val cached = when (source) {
@@ -85,6 +104,7 @@ class Feed(private val core: Core, private val source: FeedSource) {
         flush()
     }
 
+    /** The relay filter for this feed: its kinds, plus the authors, hashtag or search it needs. */
     private fun filterFor(authors: Collection<String>?, since: Long?, until: Long? = null) = Filter(
         authors = authors,
         kinds = kinds,
@@ -95,6 +115,10 @@ class Feed(private val core: Core, private val source: FeedSource) {
         limit = if (filtered) PAGE * 4 else PAGE,
     )
 
+    /**
+     * Subscribes to the feed's relays from the newest post already shown, so nothing is fetched
+     * twice.
+     */
     private suspend fun subscribe() {
         val newest = byId.values.maxOfOrNull { it.createdAt }
         coverage = when (val s = source) {
@@ -116,6 +140,7 @@ class Feed(private val core: Core, private val source: FeedSource) {
         delay(2500)
     }
 
+    /** Takes a post from a relay: stores it, then shows it if it belongs in this feed. */
     private fun receive(event: Event, relay: String) {
         core.ingest(event, relay)
         if (source == FeedSource.Following && event.pubkey !in core.follows.value) return
@@ -124,6 +149,10 @@ class Feed(private val core: Core, private val source: FeedSource) {
         scheduleFlush()
     }
 
+    /**
+     * Adds a post to the list, unless it's muted, expired, a reply where replies aren't shown, or
+     * an older copy of something newer.
+     */
     private fun add(event: Event) {
         if (event.pubkey in core.muted.value) return
         if (event.isExpired()) return
@@ -144,6 +173,7 @@ class Feed(private val core: Core, private val source: FeedSource) {
         }
     }
 
+    /** Updates the list shortly after posts arrive, so a burst of them redraws once. */
     private fun scheduleFlush() {
         if (flushJob?.isActive == true) return
         flushJob = core.scope.launch {
@@ -152,10 +182,12 @@ class Feed(private val core: Core, private val source: FeedSource) {
         }
     }
 
+    /** Publishes the list, newest first. */
     private fun flush() {
         notes.value = synchronized(byId) { byId.values.sortedByDescending { it.createdAt } }
     }
 
+    /** Loads older posts when you near the end: from the database first, then from relays. */
     fun loadMore() {
         if (moreRunning || source == FeedSource.Trending || source is FeedSource.Search) return
         val oldest = notes.value.lastOrNull()?.createdAt ?: return
@@ -209,6 +241,7 @@ class Feed(private val core: Core, private val source: FeedSource) {
         }
     }
 
+    /** Fetches any bookmarked posts not yet stored, then shows them all. */
     private suspend fun loadBookmarks() {
         val missing = core.bookmarks.value.filter { core.store.event(it) == null }
         if (missing.isNotEmpty()) {

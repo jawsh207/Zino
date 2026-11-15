@@ -1,3 +1,8 @@
+/*
+ * The wallet, through Nostr Wallet Connect (NIP-47). Zino holds no money: it sends encrypted
+ * requests to the user's own wallet over relays, to check the balance, list payments, pay invoices
+ * and make new ones.
+ */
 package app.struthio.nostr.data
 
 import app.struthio.nostr.core.Draft
@@ -25,6 +30,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
+/** One payment in the wallet's history. */
 data class Transaction(
     val incoming: Boolean,
     val msats: Long,
@@ -47,6 +53,10 @@ class Wallet(private val core: Core) {
         val ASSUMED_METHODS = setOf("pay_invoice", "get_balance", "make_invoice", "list_transactions")
     }
 
+    /**
+     * A live wallet connection: its secret, relays, the requests the wallet supports, and the key
+     * for encrypting to it.
+     */
     private class Connection(val uri: NwcUri, val relays: Set<String>, val methods: Set<String>) {
         val signer = LocalSigner(uri.secret)
         val conversation = Nip44.conversationKey(uri.secret, uri.wallet)
@@ -77,6 +87,10 @@ class Wallet(private val core: Core) {
         AppLog.add("wallet restored")
     }
 
+    /**
+     * Connects a wallet from its nostr+walletconnect link, checks what it supports, and saves it if
+     * asked.
+     */
     suspend fun connect(text: String, save: Boolean = true) {
         val uri = NwcUri.parse(text) ?: throw UserError("That is not a wallet connection link.")
         val relays = uri.relays.mapNotNull(::normalizeRelay).toSet()
@@ -99,6 +113,7 @@ class Wallet(private val core: Core) {
         connected.value = true
     }
 
+    /** Forgets the wallet. */
     fun disconnect() {
         stopListening()
         connection = null
@@ -110,6 +125,7 @@ class Wallet(private val core: Core) {
         transactions.value = emptyList()
     }
 
+    /** True if the connected wallet supports this request. */
     fun supports(method: String) = connection?.methods?.contains(method) == true
 
     /** Requests still waiting for the wallet, by request id. */
@@ -148,12 +164,14 @@ class Wallet(private val core: Core) {
         }
     }
 
+    /** Stops listening for the wallet's answers. */
     private fun stopListening() {
         listener?.let(core.pool::close)
         listener = null
         listening.value = false
     }
 
+    /** Sends one request to the wallet and waits for its answer. */
     private suspend fun call(method: String, params: JSONObject = JSONObject(), timeoutMs: Long = 30_000): JSONObject {
         val c = connection ?: throw UserError("Connect a wallet first.")
         listen(c)
@@ -205,6 +223,7 @@ class Wallet(private val core: Core) {
         }
     }
 
+    /** Updates the balance and history, keeping the old ones if it fails. */
     suspend fun refresh() {
         if (connection == null) return
         try {
@@ -218,6 +237,7 @@ class Wallet(private val core: Core) {
         }
     }
 
+    /** Fetches the balance and recent payments, if the wallet supports them. */
     private suspend fun fetch() {
         if (supports("get_balance")) balance.value = call("get_balance").optLong("balance")
         if (supports("list_transactions")) {
@@ -237,11 +257,13 @@ class Wallet(private val core: Core) {
         }
     }
 
+    /** Pays a lightning invoice, then updates the balance. */
     suspend fun pay(invoice: String) {
         call("pay_invoice", JSONObject().put("invoice", invoice.removePrefix("lightning:")), 60_000)
         runCatching { refresh() }
     }
 
+    /** Asks the wallet for an invoice to receive [sats]. */
     suspend fun makeInvoice(sats: Long, description: String): String {
         val params = JSONObject().put("amount", sats * 1000)
         if (description.isNotBlank()) params.put("description", description)

@@ -1,3 +1,7 @@
+/*
+ * Small pieces shared by many screens: loading pictures with a memory cache, avatars, custom emoji
+ * in text, list rows, unread markers, and formatting times and counts.
+ */
 package app.struthio.nostr.ui
 
 import android.graphics.Bitmap
@@ -111,9 +115,11 @@ fun CoroutineScope.act(nav: Nav, block: suspend () -> Unit) = launch(Dispatchers
     }
 }
 
+/** Decoded pictures kept in memory, plus the queues that load them. */
 private object Images {
     private val heap = (Runtime.getRuntime().maxMemory() / 8).toInt()
     val memory = object : LruCache<String, Bitmap>(heap) {
+        /** Counts a picture by the memory it takes. */
         override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
     }
 
@@ -143,6 +149,7 @@ private object Images {
 
     private const val RETRY_MS = 120_000L
 
+    /** Decodes a picture from a file, scaled down to about [widthPx]. */
     fun decode(file: java.io.File, widthPx: Int): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.path, bounds)
@@ -156,6 +163,7 @@ private object Images {
     }
 }
 
+/** A picture from the web, loading in the background; null until it's ready. */
 @Composable
 fun rememberImage(url: String?, width: Dp): State<Bitmap?> {
     val core = LocalCore.current
@@ -171,6 +179,7 @@ fun rememberImage(url: String?, width: Dp): State<Bitmap?> {
     }
 }
 
+/** A picture from the web, blank until it loads. */
 @Composable
 fun NetImage(url: String, width: Dp, modifier: Modifier = Modifier, scale: ContentScale = ContentScale.Crop) {
     val bitmap by rememberImage(url, width)
@@ -181,6 +190,7 @@ fun NetImage(url: String, width: Dp, modifier: Modifier = Modifier, scale: Conte
     }
 }
 
+/** A person's profile picture, or their initials while there isn't one. */
 @Composable
 fun Avatar(pubkey: String, size: Dp = 48.dp, onClick: (() -> Unit)? = null) {
     val core = LocalCore.current
@@ -231,6 +241,7 @@ fun Modifier.fullBleed(gutter: Dp) = layout { measurable, constraints ->
     layout(constraints.maxWidth, placeable.height) { placeable.place(-g, 0) }
 }
 
+/** Up to two initials for a name. */
 private fun initials(name: String): String {
     val words = name.split(' ').filter { it.isNotEmpty() }
     return when {
@@ -239,6 +250,7 @@ private fun initials(name: String): String {
     }.uppercase()
 }
 
+/** A loading indicator, centred. */
 @Composable
 fun Loading(modifier: Modifier = Modifier.fillMaxWidth()) {
     Box(modifier, contentAlignment = Alignment.Center) {
@@ -282,12 +294,14 @@ fun EmojiText(
     )
 }
 
+/** Adds text, showing custom emoji codes like :wave: as their pictures (NIP-30). */
 fun AnnotatedString.Builder.appendEmoji(text: String, emoji: Map<String, String>) {
     splitEmoji(text, emoji).forEach { (piece, isCode) ->
         if (isCode) appendInlineContent("emoji:$piece", ":$piece:") else append(piece)
     }
 }
 
+/** The inline pictures for custom emoji in a text. */
 fun emojiImages(emoji: Map<String, String>): Map<String, InlineTextContent> = emoji.entries.associate { (code, url) ->
     "emoji:$code" to InlineTextContent(Placeholder(1.3.em, 1.3.em, PlaceholderVerticalAlign.TextCenter)) {
         val bitmap by rememberImage(url, 40.dp)
@@ -315,6 +329,7 @@ fun UnreadAvatar(pubkey: String, unread: Boolean, size: Dp = 48.dp) {
     }
 }
 
+/** A row in a rounded card, used by lists throughout the app. */
 @Composable
 fun CardRow(
     shape: Shape,
@@ -337,6 +352,7 @@ fun CardRow(
     )
 }
 
+/** How long ago, in short form: now, 5m, 3h, 2d, or a date. */
 fun relativeTime(createdAt: Long, now: Long = System.currentTimeMillis() / 1000): String {
     val s = (now - createdAt).coerceAtLeast(0)
     return when {
@@ -348,6 +364,7 @@ fun relativeTime(createdAt: Long, now: Long = System.currentTimeMillis() / 1000)
     }
 }
 
+/** A count in short form, like 1.2K or 3M. */
 fun compact(n: Long): String = when {
     n >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM", n / 1_000_000.0).replace(".0M", "M")
     n >= 1_000 -> String.format(java.util.Locale.US, "%.1fk", n / 1_000.0).replace(".0k", "k")

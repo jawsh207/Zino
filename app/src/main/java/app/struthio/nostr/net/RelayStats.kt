@@ -1,3 +1,7 @@
+/*
+ * Per-relay figures for the relay screens: data used and how often each relay answered, over the
+ * last few days.
+ */
 package app.struthio.nostr.net
 
 import org.json.JSONArray
@@ -9,11 +13,16 @@ import org.json.JSONObject
  * was down while the app was closed isn't known to have been.
  */
 class RelayStats(load: () -> String?, private val save: (String) -> Unit) {
+    /**
+     * A relay's totals over recent days: data down and up, and connection attempts made and
+     * reached.
+     */
     data class Summary(val down: Long, val up: Long, val tries: Int, val reached: Int) {
         /** Percent of connection attempts that got through, or null before any. */
         val uptime: Int? get() = if (tries == 0) null else (reached * 100L / tries).toInt()
     }
 
+    /** One day's figures for one relay. */
     private class Day(var tries: Int = 0, var reached: Int = 0, var down: Long = 0, var up: Long = 0)
 
     private val lock = Any()
@@ -25,8 +34,10 @@ class RelayStats(load: () -> String?, private val save: (String) -> Unit) {
         runCatching { load()?.let(::parse) }
     }
 
+    /** Today, counted in days since 1970. */
     private fun today() = System.currentTimeMillis() / 86_400_000L
 
+    /** Changes today's figures for a relay. */
     private inline fun update(url: String, change: Day.() -> Unit) {
         synchronized(lock) {
             val days = relays.getOrPut(url) { java.util.TreeMap() }
@@ -37,11 +48,13 @@ class RelayStats(load: () -> String?, private val save: (String) -> Unit) {
         }
     }
 
+    /** Adds data sent and received, in bytes. */
     fun traffic(url: String, down: Int, up: Int) = update(url) {
         this.down += down
         this.up += up
     }
 
+    /** Counts a connection attempt and whether it got through. */
     fun attempt(url: String, reached: Boolean) {
         update(url) {
             tries++
@@ -51,11 +64,13 @@ class RelayStats(load: () -> String?, private val save: (String) -> Unit) {
         if (System.currentTimeMillis() - savedAt > SAVE_EVERY_MS) flush()
     }
 
+    /** A relay's totals for the days kept. */
     fun summary(url: String): Summary = synchronized(lock) {
         val days = relays[url]?.tailMap(today() - DAYS + 1)?.values.orEmpty()
         Summary(days.sumOf { it.down }, days.sumOf { it.up }, days.sumOf { it.tries }, days.sumOf { it.reached })
     }
 
+    /** Saves the figures, if they changed. */
     fun flush() {
         val text = synchronized(lock) {
             if (!dirty) return
@@ -73,6 +88,7 @@ class RelayStats(load: () -> String?, private val save: (String) -> Unit) {
         save(text)
     }
 
+    /** Reads saved figures back. */
     private fun parse(text: String) {
         val o = JSONObject(text)
         o.keys().forEach { url ->

@@ -1,3 +1,9 @@
+/*
+ * Talking to relays (NIP-01). One connection per relay, opened only while something needs it and
+ * the app is in front. Subscriptions are spread over the right relays, events are checked before
+ * use, posts are sent and their answers collected, sign-in (NIP-42) is handled, and failing relays
+ * rest for a while before being tried again.
+ */
 package app.struthio.nostr.net
 
 import app.struthio.nostr.core.Draft
@@ -21,6 +27,10 @@ import org.json.JSONArray
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
+/**
+ * A request for events from some relays. Events arrive through [onEvent] and each relay reports
+ * through [onDone] when it has sent what it had.
+ */
 class Subscription internal constructor(
     val id: String,
     val relays: Set<String>,
@@ -49,6 +59,7 @@ class Subscription internal constructor(
         const val GIFT_WRAP_BACKDATE_S = 2 * 86400L
     }
 
+    /** The REQ message for these filters. */
     private fun requestFor(list: List<Filter>) = buildString {
         append("[\"REQ\",").append(quoteJson(id))
         list.forEach { append(',').append(it.toJson()) }
@@ -56,6 +67,7 @@ class Subscription internal constructor(
     }
 }
 
+/** A relay's answer to a post: accepted or not, and its message. */
 data class PublishResult(val ok: Boolean, val message: String)
 
 /** All relay connections. Sockets exist only while something needs them and the app is in front. */
@@ -71,6 +83,7 @@ class RelayPool(
     private val relays = ConcurrentHashMap<String, Relay>()
     private val nextId = AtomicInteger()
     private val verified = object : LinkedHashMap<String, Boolean>(4096, 0.75f, true) {
+        /** Keeps the memory of seen events from growing without end. */
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?) = size > 8000
     }
 
@@ -103,8 +116,10 @@ class RelayPool(
 
     val isVisible: Boolean get() = visible.get() > 0
 
+    /** The connection for a relay, made the first time it's needed. */
     private fun relay(url: String) = relays.getOrPut(url) { Relay(url) }
 
+    /** Asks these relays for events matching the filters. */
     fun subscribe(
         urls: Set<String>,
         filters: List<Filter>,
@@ -116,6 +131,7 @@ class RelayPool(
         return sub
     }
 
+    /** Ends a subscription on all its relays. */
     fun close(sub: Subscription) {
         sub.relays.forEach { relays[it]?.remove(sub) }
     }
@@ -202,6 +218,7 @@ class RelayPool(
         return synchronized(remaining) { best }
     }
 
+    /** Sends an event to these relays and waits for each one's answer, up to [timeoutMs]. */
     suspend fun publish(event: Event, urls: Set<String>, timeoutMs: Long = 8_000): Map<String, PublishResult> {
         if (urls.isEmpty()) return emptyMap()
         val pending = urls.associateWith { relay(it).publish(event) }
@@ -294,16 +311,19 @@ class RelayPool(
     /** What a relay refused or what we refused from it, for the account check. */
     fun problemsOf(url: String): List<String> = synchronized(problems) { problems[url]?.toList().orEmpty() }
 
+    /** Disconnects every relay and saves the data use figures. */
     fun shutdown() {
         foreground = false
         relays.values.forEach { it.disconnect() }
         stats?.flush()
     }
 
+    /** Forgets the problems noted for each relay. */
     fun clearProblems() {
         synchronized(problems) { problems.clear() }
     }
 
+    /** True if none of these relays sent lists that had to be dropped as invalid. */
     fun noDroppedLists(urls: Set<String>): Boolean = urls.none { url -> problemsOf(url).any { it.startsWith("dropped") } }
 
     /** Whether this relay has accepted our sign-in on the current connection. */
@@ -312,6 +332,7 @@ class RelayPool(
     /** Whether this relay turned down a correct sign-in, as a misconfigured relay does. */
     fun signInRefused(url: String): Boolean = relays[url]?.signInRefused == true
 
+    /** Notes a problem with a relay, for the log and the relay screen. */
     private fun note(url: String, problem: String) {
         AppLog.add("$url $problem")
         synchronized(problems) {
@@ -320,6 +341,10 @@ class RelayPool(
         }
     }
 
+    /**
+     * Checks an event from a relay: its id and signature must match. Bad ones are dropped and
+     * noted.
+     */
     private fun accept(event: Event, url: String): Boolean {
         if (!event.hasValidId()) {
             note(url, "dropped kind ${event.kind}: id does not match its content")
@@ -334,6 +359,7 @@ class RelayPool(
         return true
     }
 
+    /** A post waiting for a relay's answer. */
     private class Pending(val event: Event, val result: CompletableDeferred<PublishResult>) {
         var retriedAuth = false
     }
@@ -386,6 +412,10 @@ class RelayPool(
         private var idleJob: Job? = null
         private var retryJob: Job? = null
 
+        /**
+         * Adds a subscription and sends it once there's room. A resting relay answers straight away
+         * that it's done.
+         */
         fun add(sub: Subscription) {
             val cooling = synchronized(lock) {
                 if (cooling()) return@synchronized true
@@ -398,6 +428,7 @@ class RelayPool(
             if (cooling) scope.launch { sub.onDone(url, false) }
         }
 
+        /** True while this relay is resting after failures or a rate limit. */
         private fun cooling(): Boolean = System.currentTimeMillis() < maxOf(failedUntil, limitedUntil)
 
         /** REQs go out one at a time and only so many stay open, because relays limit both. */
@@ -434,6 +465,7 @@ class RelayPool(
             }
         }
 
+        /** Ends a subscription, telling the relay if it was sent. */
         fun remove(sub: Subscription) {
             val wasOpen = synchronized(lock) {
                 subs.remove(sub.id)
@@ -445,6 +477,7 @@ class RelayPool(
             if (wasOpen) write("[\"CLOSE\",${quoteJson(sub.id)}]")
         }
 
+        /** Asks this relay how many events match (NIP-45). */
         fun count(id: String, request: String, onResult: (Long?) -> Unit) {
             val send = synchronized(lock) {
                 counts[id] = request to onResult
@@ -455,6 +488,7 @@ class RelayPool(
             if (send) write(request)
         }
 
+        /** Stops waiting for a count. */
         fun endCount(id: String) {
             synchronized(lock) {
                 counts.remove(id)
@@ -462,6 +496,7 @@ class RelayPool(
             }
         }
 
+        /** Sends an event to this relay; the result says if it was accepted. */
         fun publish(event: Event): CompletableDeferred<PublishResult> {
             val deferred = CompletableDeferred<PublishResult>()
             val send = synchronized(lock) {
@@ -483,6 +518,7 @@ class RelayPool(
             return deferred
         }
 
+        /** Stops waiting for an answer to this post. */
         fun forget(id: String) {
             synchronized(lock) {
                 pending.remove(id)
@@ -490,6 +526,7 @@ class RelayPool(
             }
         }
 
+        /** Sends a message to the relay. */
         private fun write(text: String) {
             scope.launch { socket?.send(text) }
         }
@@ -497,6 +534,9 @@ class RelayPool(
         /** Set while a socket from an old network is being replaced, so its closing isn't a failure. */
         private var renewing = false
 
+        /**
+         * Opens the connection if something needs it, the app is in front and there's a network.
+         */
         private fun ensureConnected() {
             if (socket != null || !foreground || !onlineState.value) return
             // A paused relay, after failures or a refusal, isn't dialled early because a feed wants it.
@@ -510,6 +550,7 @@ class RelayPool(
             ws.connect()
         }
 
+        /** Closes the connection after a quiet spell when nothing needs it. */
         private fun scheduleIdleClose() {
             if (subs.isNotEmpty() || pending.isNotEmpty() || counts.isNotEmpty()) return
             idleJob?.cancel()
@@ -522,6 +563,7 @@ class RelayPool(
             }
         }
 
+        /** The connection is open: resend subscriptions and waiting posts. */
         private fun opened() {
             AppLog.add("$url connected")
             stats?.attempt(url, true)
@@ -553,6 +595,10 @@ class RelayPool(
             }
         }
 
+        /**
+         * The connection closed: decide whether the relay should rest, then retry if it's still
+         * needed.
+         */
         private fun closed(error: Throwable?) {
             // Without a network every relay fails at once: that says nothing about the relays. Nor
             // does a failure while a network that just came up is still settling.
@@ -632,6 +678,7 @@ class RelayPool(
             waiting.forEach { it(null) }
         }
 
+        /** Closes the connection and stops any retry. */
         fun disconnect() {
             val ws = synchronized(lock) {
                 retryJob?.cancel()
@@ -659,11 +706,16 @@ class RelayPool(
             old?.close()
         }
 
+        /** Reconnects after a network change if anything needs this relay. */
         fun wake() {
             // Pauses stay: a network change, which does say something, is reported on its own.
             synchronized(lock) { if (subs.isNotEmpty()) ensureConnected() }
         }
 
+        /**
+         * Handles one message from the relay: events, end of stored events, answers, closed
+         * requests, notices, sign-in challenges and counts.
+         */
         private fun message(text: String) {
             val msg = try {
                 JSONArray(text)
@@ -722,6 +774,7 @@ class RelayPool(
             }
         }
 
+        /** Handles the relay's answer to a post or to our sign-in. */
         private fun ok(id: String, accepted: Boolean, message: String) {
             val isAuth = synchronized(lock) { id == authEventId }
             if (isAuth) {
@@ -747,6 +800,7 @@ class RelayPool(
             item.result.complete(PublishResult(accepted, message))
         }
 
+        /** Signed in: send the requests and posts that were waiting for it. */
         private fun replayAfterAuth() {
             val requests = synchronized(lock) {
                 authEventId = null
@@ -757,6 +811,7 @@ class RelayPool(
             requests.forEach { socket?.send(it) }
         }
 
+        /** Sign-in failed: end the requests and posts that needed it. */
         private fun failAuth(message: String) {
             note(url, "sign-in failed: $message")
             val affected: List<Subscription>

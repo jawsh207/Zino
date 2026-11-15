@@ -1,3 +1,7 @@
+/*
+ * The look of the app: colours from the wallpaper (Material You), Google Sans Flex, and Material 3
+ * Expressive.
+ */
 package app.struthio.nostr.ui
 
 import android.os.Build

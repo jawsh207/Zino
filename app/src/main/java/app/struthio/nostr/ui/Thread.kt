@@ -1,3 +1,7 @@
+/*
+ * Reading and writing: a post with its replies laid out as a thread, the posts with a hashtag, and
+ * the screen for writing a post, with mentions, pictures, polls and quotes.
+ */
 package app.struthio.nostr.ui
 
 import androidx.compose.foundation.layout.Arrangement
@@ -59,6 +63,7 @@ private fun ordered(all: List<Event>, rootId: String): List<Pair<Event, Int>> {
     val byParent = all.filter { it.id != rootId }.groupBy { threadRef(it).parent ?: rootId }
     val known = all.map { it.id }.toSet()
     val out = ArrayList<Pair<Event, Int>>()
+    /** Adds the replies under [id], and theirs, in order. */
     fun walk(id: String, depth: Int) {
         byParent[id].orEmpty().forEach {
             out += it to depth
@@ -113,6 +118,7 @@ private fun ReplyTarget(note: Event, onClear: (() -> Unit)?) {
     }
 }
 
+/** A post with its replies, and a box to reply to it or to any reply. */
 @Composable
 fun ThreadScreen(screen: Screen.Thread) {
     val core = LocalCore.current
@@ -231,6 +237,7 @@ fun ThreadScreen(screen: Screen.Thread) {
     }
 }
 
+/** Posts with a hashtag. */
 @Composable
 fun HashtagScreen(tag: String) {
     val core = LocalCore.current
@@ -245,6 +252,7 @@ fun HashtagScreen(tag: String) {
     }
 }
 
+/** Writing a new post, maybe quoting another. */
 @Composable
 fun ComposeScreen(quoteId: String?) {
     val core = LocalCore.current

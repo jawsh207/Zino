@@ -1,3 +1,6 @@
+/*
+ * The text box for writing posts and messages, which suggests people to mention when you type @.
+ */
 package app.struthio.nostr.ui
 
 import androidx.compose.foundation.layout.Arrangement
@@ -39,6 +42,7 @@ class NoteDraft(initial: String = "") {
         return text
     }
 
+    /** Empties the text and its mentions. */
     fun clear() {
         value = TextFieldValue("")
         mentions.clear()
@@ -55,6 +59,7 @@ class NoteDraft(initial: String = "") {
             return word.takeIf { it.isNotEmpty() && it.length <= 30 && it.none(Char::isWhitespace) }
         }
 
+    /** Puts the chosen person in place of the @word being typed, to be sent as a mention. */
     fun choose(name: String, pubkey: String) {
         val end = value.selection.end
         val start = value.text.lastIndexOf('@', end - 1)

@@ -1,3 +1,6 @@
+/*
+ * The top bar used on screens opened over the tabs.
+ */
 package app.struthio.nostr.ui
 
 import androidx.compose.foundation.layout.RowScope
@@ -10,6 +13,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.style.TextOverflow
 
+/** A top bar with a back button, a title and optional actions. */
 @Composable
 fun BackBar(title: String, actions: @Composable RowScope.() -> Unit = {}) {
     val nav = LocalNav.current

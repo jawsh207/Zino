@@ -1,3 +1,9 @@
+/*
+ * The database on the phone (SQLite). It keeps the events Zino has seen, an index of their tags,
+ * zap receipts, follows, private messages and their reactions, what has been read, and which gift
+ * wraps were already opened. Feeds, profiles, counters and notifications are all read from here,
+ * so the app works offline and opens fast.
+ */
 package app.struthio.nostr.data
 
 import android.content.ContentValues
@@ -24,6 +30,10 @@ import app.struthio.nostr.core.value
 import app.struthio.nostr.core.values
 import org.json.JSONArray
 
+/**
+ * Counts for one post: likes and the top reactions, your own reaction, replies, boosts, zaps and
+ * zapped sats.
+ */
 data class Stats(
     val top: List<String> = emptyList(),
     val mine: String? = null,
@@ -37,6 +47,10 @@ data class Stats(
     val emoji: Map<String, String> = emptyMap(),
 )
 
+/**
+ * One private message (NIP-17), already decrypted: who sent it, when, its text or file, and what it
+ * replies to.
+ */
 data class Dm(
     val id: String,
     val room: String,
@@ -51,8 +65,10 @@ data class Dm(
 /** A reaction sent inside a private chat (NIP-17 with NIP-25), to one message. */
 data class DmReaction(val id: String, val target: String, val sender: String, val content: String, val createdAt: Long)
 
+/** A private conversation: who is in it and its latest message. */
 data class Room(val key: String, val members: List<String>, val last: Dm)
 
+/** Something that happened to you: a reply, mention, reaction, boost or zap, and who did it. */
 data class Alert(val event: Event, val actor: String, val msats: Long, val comment: String) {
     /** The note to open for this alert. */
     val target: String?
@@ -61,6 +77,7 @@ data class Alert(val event: Event, val actor: String, val msats: Long, val comme
             else -> event.tags.values("e").lastOrNull()
         }
 
+    /** The notification's title, like "Alice reacted 💜". */
     fun headline(name: String): String = when (event.kind) {
         Kind.REACTION -> "$name reacted ${(reactionGlyph(event.content) ?: customGlyph(event.content, event.tags)).orEmpty()}".trim()
         Kind.REPOST, Kind.GENERIC_REPOST -> "$name boosted your note"
@@ -81,12 +98,15 @@ private const val CREATE_READS = "CREATE TABLE reads(key TEXT PRIMARY KEY, at IN
 private const val CREATE_DM_REACTIONS =
     "CREATE TABLE dm_reactions(id TEXT PRIMARY KEY, room TEXT NOT NULL, target TEXT NOT NULL, sender TEXT NOT NULL, content TEXT NOT NULL, created_at INTEGER NOT NULL)"
 
+/** The database itself. Version 5 added replies and reactions in private messages. */
 class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5) {
 
+    /** Lets reading and writing happen at the same time. */
     override fun onConfigure(db: SQLiteDatabase) {
         db.enableWriteAheadLogging()
     }
 
+    /** Creates the tables and indexes on first run. */
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE events(
@@ -122,6 +142,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         db.execSQL(CREATE_READS)
     }
 
+    /** Brings an older database up to date, one version at a time. */
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) db.execSQL("ALTER TABLE dms ADD COLUMN file TEXT")
         if (oldVersion < 3) db.execSQL("CREATE TABLE trusted(pubkey TEXT PRIMARY KEY)")
@@ -147,6 +168,10 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         return added
     }
 
+    /**
+     * Stores one event: replaces older versions of replaceable events, skips ones that never get
+     * stored, and indexes its tags. True if it was new.
+     */
     private fun insertOne(db: SQLiteDatabase, e: Event, relay: String): Boolean {
         if (Kind.isEphemeral(e.kind) || e.kind == Kind.GIFT_WRAP) return false
         if (Kind.isReplaceable(e.kind) || Kind.isAddressable(e.kind)) {
@@ -179,6 +204,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         val rowid = db.insertWithOnConflict("events", null, values, SQLiteDatabase.CONFLICT_IGNORE)
         if (rowid < 0) return false
 
+        /** Indexes one tag value of the event. */
         fun addRef(name: String, value: String) {
             db.execSQL("INSERT INTO refs(id, name, value) VALUES(?,?,?)", arrayOf(e.id, name, value))
         }
@@ -200,6 +226,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         return true
     }
 
+    /** Stores a checked zap receipt. */
     private fun insertZap(db: SQLiteDatabase, zap: Zap) {
         val values = ContentValues(8).apply {
             put("receipt", zap.receipt)
@@ -214,6 +241,9 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         db.insertWithOnConflict("zaps", null, values, SQLiteDatabase.CONFLICT_IGNORE)
     }
 
+    /**
+     * Removes the events a deletion request (NIP-09) points at, but only those by the same author.
+     */
     private fun applyDeletion(db: SQLiteDatabase, deletion: Event) {
         for (id in deletion.tags.values("e")) {
             db.rawQuery("SELECT rowid, pubkey, content, kind FROM events WHERE id=?", arrayOf(id)).use {
@@ -228,16 +258,19 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         }
     }
 
+    /** Reads an event from a database row. */
     private fun Cursor.event() = Event(
         getString(0), getString(1), getLong(2), getInt(3), parseTags(JSONArray(getString(4))), getString(5), getString(6),
     )
 
+    /** Reads a private message from a database row. */
     private fun Cursor.dm() = Dm(
         getString(0), getString(1), getString(2), getLong(3), getString(4),
         if (isNull(5)) null else fileFromJson(getString(5)),
         if (isNull(6)) null else getString(6),
     )
 
+    /** Runs a query for events and returns them, also handing each to [block]. */
     private inline fun events(sql: String, args: Array<String> = emptyArray(), block: (Event) -> Unit = {}): List<Event> {
         val out = ArrayList<Event>()
         readableDatabase.rawQuery(sql, args).use {
@@ -250,18 +283,22 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         return out
     }
 
+    /** An event by its id, if stored. */
     fun event(id: String): Event? = events("SELECT $COLUMNS FROM events WHERE id=?", arrayOf(id)).firstOrNull()
 
+    /** The relay an event was first seen on, for links and replies. */
     fun relayOf(id: String): String? =
         readableDatabase.rawQuery("SELECT relay FROM events WHERE id=?", arrayOf(id)).use {
             if (it.moveToFirst()) it.getString(0) else null
         }
 
+    /** The newest event of a kind by one person, like their profile or follow list. */
     fun latest(pubkey: String, kind: Int): Event? = events(
         "SELECT $COLUMNS FROM events WHERE pubkey=? AND kind=? ORDER BY created_at DESC LIMIT 1",
         arrayOf(pubkey, kind.toString()),
     ).firstOrNull()
 
+    /** The newest event of a kind for each of these people. */
     fun latestOfKind(pubkeys: Collection<String>, kind: Int): List<Event> {
         if (pubkeys.isEmpty()) return emptyList()
         return pubkeys.chunked(500).flatMap { chunk ->
@@ -270,12 +307,17 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         }
     }
 
+    /** Top-level posts by the people you follow, newest first, before [until]. */
     fun followingFeed(limit: Int, until: Long): List<Event> = events(
         """SELECT $COLUMNS FROM events WHERE kind IN ($POST_KINDS) AND root IS NULL AND created_at < ?
            AND pubkey IN (SELECT pubkey FROM follows) ORDER BY created_at DESC LIMIT ?""",
         arrayOf(until.toString(), limit.toString()),
     )
 
+    /**
+     * Everything a person posted: notes, comments, articles, media and boosts, newest first, before
+     * [until].
+     */
     fun authorNotes(pubkey: String, limit: Int, until: Long): List<Event> = events(
         "SELECT $COLUMNS FROM events WHERE pubkey=? AND kind IN ($AUTHOR_KINDS) AND created_at < ? ORDER BY created_at DESC LIMIT ?",
         arrayOf(pubkey, until.toString(), limit.toString()),
@@ -291,11 +333,13 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
     fun address(kind: Int, pubkey: String, d: String): Event? =
         events("SELECT $COLUMNS FROM events WHERE kind=? AND pubkey=? AND d=?", arrayOf(kind.toString(), pubkey, d)).firstOrNull()
 
+    /** The votes cast in a poll (NIP-88). */
     fun votes(poll: String): List<Event> = events(
         "SELECT $COLUMNS FROM events WHERE kind=1018 AND id IN (SELECT id FROM refs WHERE name='poll' AND value=?)",
         arrayOf(poll),
     )
 
+    /** Full-text search of stored posts. */
     fun searchNotes(query: String, limit: Int): List<Event> {
         val terms = query.split(Regex("\\s+")).filter { it.isNotBlank() }
             .joinToString(" ") { "\"" + it.replace("\"", "") + "*\"" }
@@ -307,6 +351,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         )
     }
 
+    /** Replaces the stored list of people you follow. */
     fun setFollows(pubkeys: Collection<String>) {
         val db = writableDatabase
         db.beginTransaction()
@@ -319,6 +364,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         }
     }
 
+    /** Replaces the stored list of trusted people (your web of trust). */
     fun setTrusted(pubkeys: Collection<String>) {
         val db = writableDatabase
         db.beginTransaction()
@@ -331,12 +377,14 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         }
     }
 
+    /** The trusted people, whose reactions and replies count. */
     fun trusted(): Set<String> {
         val out = HashSet<String>()
         readableDatabase.rawQuery("SELECT pubkey FROM trusted", null).use { while (it.moveToNext()) out += it.getString(0) }
         return out
     }
 
+    /** Counts for each of these posts, from what is stored. */
     fun stats(ids: List<String>, me: String?): Map<String, Stats> {
         if (ids.isEmpty()) return emptyMap()
         val marks = ids.joinToString(",") { "?" }
@@ -412,6 +460,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         return out
     }
 
+    /** Remembers which Nostr key a lightning address signs its zap receipts with. */
     fun setProvider(pubkey: String, nostrPubkey: String?, now: Long) {
         writableDatabase.execSQL(
             "INSERT OR REPLACE INTO providers(pubkey, nostr_pubkey, checked_at) VALUES(?,?,?)",
@@ -419,6 +468,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         )
     }
 
+    /** Your notifications, newest first, leaving out muted people. */
     fun alerts(me: String, muted: Set<String>, limit: Int): List<Alert> {
         val out = ArrayList<Alert>()
         val zaps = HashMap<String, Triple<String, Long, String>>()
@@ -443,6 +493,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         return out
     }
 
+    /** When the newest notification arrived, for the unread dot. */
     fun newestAlertTime(me: String): Long =
         readableDatabase.rawQuery(
             "SELECT MAX(created_at) FROM events WHERE id IN (SELECT id FROM refs WHERE name='p' AND value=?) AND pubkey != ?",
@@ -457,6 +508,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         )
     }
 
+    /** The notifications already seen. */
     fun readAlerts(): Set<String> {
         val out = HashSet<String>()
         readableDatabase.rawQuery("SELECT key FROM reads WHERE key NOT LIKE 'room:%'", null).use {
@@ -465,6 +517,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         return out
     }
 
+    /** Forgets what was read: in conversations, or in notifications. */
     fun clearReads(rooms: Boolean) {
         writableDatabase.execSQL("DELETE FROM reads WHERE key ${if (rooms) "" else "NOT "}LIKE 'room:%'")
     }
@@ -476,13 +529,16 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         arrayOf(me, target),
     )
 
+    /** True if this gift wrap was already opened. */
     fun hasWrap(id: String): Boolean =
         readableDatabase.rawQuery("SELECT 1 FROM wraps WHERE id=?", arrayOf(id)).use { it.moveToFirst() }
 
+    /** Remembers that a gift wrap was opened. */
     fun addWrap(id: String) {
         writableDatabase.execSQL("INSERT OR IGNORE INTO wraps(id) VALUES(?)", arrayOf(id))
     }
 
+    /** Stores a private message, keeping its reply link if one turns up later. */
     fun addDm(dm: Dm) {
         val values = ContentValues(5).apply {
             put("id", dm.id)
@@ -498,6 +554,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         dm.replyTo?.let { writableDatabase.execSQL("UPDATE dms SET reply_to=? WHERE id=? AND reply_to IS NULL", arrayOf(it, dm.id)) }
     }
 
+    /** Stores a reaction to a private message. */
     fun addDmReaction(room: String, reaction: DmReaction) {
         val values = ContentValues(6).apply {
             put("id", reaction.id)
@@ -525,10 +582,12 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         return out
     }
 
+    /** Forgets which gift wraps were opened, so they are all read again. */
     fun forgetOpenedWraps() {
         writableDatabase.execSQL("DELETE FROM wraps")
     }
 
+    /** Your conversations, newest first. */
     fun rooms(me: String): List<Room> {
         val out = ArrayList<Room>()
         readableDatabase.rawQuery(
@@ -545,6 +604,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         return out
     }
 
+    /** The latest messages in a conversation, oldest first. */
     fun messages(room: String, limit: Int): List<Dm> {
         val out = ArrayList<Dm>()
         readableDatabase.rawQuery(
@@ -567,6 +627,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         return out
     }
 
+    /** People whose stored profile matches the search. */
     fun searchProfiles(query: String, limit: Int): List<Event> {
         val like = "%" + query.replace("%", "").replace("_", "") + "%"
         return events(
@@ -596,6 +657,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         }
     }
 
+    /** Deletes everything stored, as on signing out. */
     fun clearAll() {
         writableDatabase.execSQL("DELETE FROM reads")
         val db = writableDatabase
@@ -615,6 +677,8 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
     }
 }
 
+/** The key a conversation is stored under: its members, sorted. */
 fun roomKey(members: Set<String>) = members.sorted().joinToString(",")
 
+/** True if this is a 64-character hex key. */
 fun isHexKey(s: String?) = Hex.isKey(s)

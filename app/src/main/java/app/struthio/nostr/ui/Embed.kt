@@ -1,3 +1,8 @@
+/*
+ * Videos from sites like YouTube, shown in posts. Only a still and a play button at first; tapping
+ * it loads the site's player in a web view, which can go full screen. Errors from the player go to
+ * the log.
+ */
 package app.struthio.nostr.ui
 
 import android.annotation.SuppressLint
@@ -121,6 +126,7 @@ private const val ORIGIN = "https://app.zino.nostr/"
 /** Words a player page shows when it won't play, worth a line in the logs. */
 private val REFUSALS = listOf("Error", "error", "Sign in", "unavailable", "not available", "blocked")
 
+/** The site's own player in a web view, kept over its card as the list scrolls. */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun EmbedPlayer(embed: VideoEmbed) {
@@ -129,6 +135,7 @@ private fun EmbedPlayer(embed: VideoEmbed) {
     // The player's own full-screen button, while it's showing: the view it handed over and how to end it.
     var fullscreen by remember { mutableStateOf<Pair<View, WebChromeClient.CustomViewCallback>?>(null) }
 
+    /** Returns from full screen to the card. */
     fun leaveFullscreen() {
         val (view, callback) = fullscreen ?: return
         (view.parent as? ViewGroup)?.removeView(view)
@@ -163,6 +170,7 @@ private fun EmbedPlayer(embed: VideoEmbed) {
                         return false
                     }
 
+                    /** The player loaded: notes in the log if the site refused to play. */
                     override fun onPageFinished(view: WebView, url: String) {
                         // What the player page says, so a refusal like "Error 153" shows up in the logs.
                         view.postDelayed({
@@ -173,10 +181,12 @@ private fun EmbedPlayer(embed: VideoEmbed) {
                         }, 6_000)
                     }
 
+                    /** Logs a part of the player that failed to load. */
                     override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                         AppLog.add("video ${embed.site}: ${request.url.host} failed: ${error.description}")
                     }
 
+                    /** Logs a part of the player the server refused. */
                     override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
                         AppLog.add("video ${embed.site}: ${request.url.host}${request.url.path} answered ${response.statusCode}")
                     }
@@ -193,8 +203,10 @@ private fun EmbedPlayer(embed: VideoEmbed) {
                         if (Build.VERSION.SDK_INT >= 30) activity.window.insetsController?.hide(WindowInsets.Type.systemBars())
                     }
 
+                    /** The player left full screen. */
                     override fun onHideCustomView() = leaveFullscreen()
 
+                    /** Logs errors from the player's own scripts. */
                     override fun onConsoleMessage(message: ConsoleMessage): Boolean {
                         if (message.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
                             AppLog.add("video ${embed.site}: ${message.message().take(160)}")
@@ -241,6 +253,7 @@ private fun EmbedPlayer(embed: VideoEmbed) {
     Box(Modifier.fillMaxSize().onGloballyPositioned { place(player, host, it) })
 }
 
+/** Moves the player to sit exactly over its card. */
 private fun place(player: WebView, host: FrameLayout?, card: LayoutCoordinates) {
     if (host == null || !card.isAttached) return
     val at = card.positionInWindow()

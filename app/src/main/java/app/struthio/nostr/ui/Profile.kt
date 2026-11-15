@@ -1,3 +1,8 @@
+/*
+ * People: profile screens with banner, picture, about text, status and tabs for posts, replies,
+ * boosts and a gallery; lists of who someone follows or who follows them; and search for people,
+ * posts, hashtags and Nostr links.
+ */
 package app.struthio.nostr.ui
 
 import android.net.Uri
@@ -117,10 +122,15 @@ import app.struthio.nostr.data.roomKey
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 
+/** Copies text to the clipboard. */
 fun Context.copy(text: String) {
     (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Zino", text))
 }
 
+/**
+ * A person's profile: banner, picture, name, about, links and status, follow and zap buttons, and
+ * their posts.
+ */
 @Composable
 fun ProfileScreen(pubkey: String) {
     val core = LocalCore.current
@@ -320,6 +330,7 @@ fun ProfileScreen(pubkey: String) {
     }
 }
 
+/** The people someone follows, or the people who follow them. */
 @Composable
 fun PeopleScreen(screen: Screen.People) {
     val core = LocalCore.current
@@ -369,6 +380,7 @@ fun rememberPeople(query: String): List<String> {
     }
 }
 
+/** Search for people and posts. A hashtag, Nostr address or nostr link opens what it points at. */
 @Composable
 fun SearchScreen() {
     val core = LocalCore.current
@@ -383,6 +395,7 @@ fun SearchScreen() {
     }
     val people = rememberPeople(query)
 
+    /** Opens what was typed if it's a hashtag, Nostr address or link; otherwise searches. */
     fun submit() {
         val text = query.trim()
         when {
@@ -431,6 +444,7 @@ fun SearchScreen() {
     }
 }
 
+/** A person as a row: picture, name and Nostr address. */
 @Composable
 fun PersonRow(core: Core, pubkey: String, shape: Shape, onClick: () -> Unit) {
     LaunchedEffect(pubkey) { core.wantProfile(pubkey) }
@@ -576,6 +590,7 @@ private fun ProfileBanner(pubkey: String, banner: String?) {
     }
 }
 
+/** The profile's banner picture, or a plain colour without one. */
 @Composable
 private fun BannerArea(banner: String?, modifier: Modifier) {
     Box(modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest)) {
@@ -588,6 +603,7 @@ private fun BannerArea(banner: String?, modifier: Modifier) {
     }
 }
 
+/** A round button over the banner, kept visible on any picture. */
 @Composable
 private fun OverBannerButton(icon: ImageVector, description: String, solid: Boolean, onClick: () -> Unit) {
     // A dark disc keeps it visible on any banner; on the solid bar it's a plain button.

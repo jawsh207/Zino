@@ -1,3 +1,9 @@
+/*
+ * Settings, editing your profile, and signing in. Settings cover keys and backups, relays, media
+ * servers, how often to check for activity, the trusted network, link previews, logs and signing
+ * out. Sign-in offers a new account, an existing key, a signer app (NIP-55) or a remote signer
+ * (NIP-46).
+ */
 package app.struthio.nostr.ui
 
 import androidx.compose.runtime.LaunchedEffect
@@ -92,6 +98,7 @@ import app.struthio.nostr.data.Notifier
 import app.struthio.nostr.data.SignerBridge
 import org.json.JSONObject
 
+/** A titled card holding a group of rows. */
 @Composable
 internal fun Section(title: String, content: @Composable () -> Unit) {
     Surface(
@@ -122,6 +129,7 @@ private fun Group(title: String, vararg rows: (@Composable (Shape) -> Unit)?) {
     }
 }
 
+/** A settings row with an icon, a title and a short summary. */
 @Composable
 private fun SettingRow(
     shape: Shape,
@@ -142,11 +150,13 @@ private fun SettingRow(
     )
 }
 
+/** A settings row with a switch. */
 @Composable
 private fun SwitchRow(shape: Shape, icon: ImageVector, title: String, summary: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     SettingRow(shape, icon, title, summary, trailing = { Switch(checked, onChange) }) { onChange(!checked) }
 }
 
+/** How often checks run, in words. */
 private fun intervalLabel(minutes: Int) = when {
     minutes == 0 -> "Off"
     minutes < 60 -> "Every $minutes minutes"
@@ -154,6 +164,7 @@ private fun intervalLabel(minutes: Int) = when {
     else -> "Every ${minutes / 60} hours"
 }
 
+/** The settings screen. */
 @Composable
 fun SettingsScreen() {
     val core = LocalCore.current
@@ -378,6 +389,7 @@ fun SettingsScreen() {
     }
 }
 
+/** Choosing the servers your pictures and files are uploaded to (Blossom). */
 @Composable
 private fun MediaServersDialog(onClose: () -> Unit) {
     val core = LocalCore.current
@@ -411,6 +423,10 @@ private fun MediaServersDialog(onClose: () -> Unit) {
     )
 }
 
+/**
+ * Editing your profile: names, about, picture, banner, website, Nostr address, lightning address
+ * and status.
+ */
 @Composable
 fun EditProfileScreen() {
     val core = LocalCore.current
@@ -661,6 +677,10 @@ private fun KeyBackupDialog(onClose: () -> Unit) {
     )
 }
 
+/**
+ * Sign-in for someone not signed in: make a new account, or use a key, a backup, an npub, a signer
+ * app or a remote signer.
+ */
 @Composable
 fun Onboarding(modifier: Modifier = Modifier) {
     val core = LocalCore.current
@@ -673,6 +693,7 @@ fun Onboarding(modifier: Modifier = Modifier) {
     var busy by remember { mutableStateOf(false) }
     var remoteSigning by remember { mutableStateOf(false) }
 
+    /** Runs a sign-in step, showing it's busy meanwhile. */
     fun run(block: suspend () -> Unit) {
         busy = true
         scope.act(nav) {

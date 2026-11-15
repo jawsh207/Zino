@@ -1,3 +1,8 @@
+/*
+ * The one Android screen Zino runs in. It shows the app, passes nostr: and other links to it,
+ * carries requests to and from a signer app, and tells the relays when the app comes to the front
+ * or goes away.
+ */
 package app.struthio.nostr
 
 import android.content.Intent
@@ -14,6 +19,7 @@ import app.struthio.nostr.ui.ZinoTheme
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 
+/** The app's only activity. */
 class MainActivity : ComponentActivity() {
     private val core get() = (application as ZinoApp).core
     private val deepLink = MutableStateFlow<String?>(null)
@@ -33,6 +39,7 @@ class MainActivity : ComponentActivity() {
         signerReply = null
     }
 
+    /** Sets up the screen, the signer app bridge and the first link, then shows the app. */
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -63,16 +70,19 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
     }
 
+    /** A link opened while Zino was already running. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         deepLink.value = intent.dataString
     }
 
+    /** The app came to the front: relays may connect. */
     override fun onStart() {
         super.onStart()
         core.pool.activityStarted()
     }
 
+    /** The app went away: relays disconnect once idle. */
     override fun onStop() {
         super.onStop()
         core.pool.activityStopped()

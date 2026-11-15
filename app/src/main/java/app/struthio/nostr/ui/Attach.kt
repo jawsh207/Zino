@@ -1,3 +1,7 @@
+/*
+ * Adding pictures and emoji to what you write: a button that uploads a picture from the phone, the
+ * row of attached pictures, and the emoji picker.
+ */
 package app.struthio.nostr.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -72,6 +76,7 @@ fun AttachImageButton(onUploaded: (Upload) -> Unit) {
     }
 }
 
+/** The pictures attached so far, each with a button to remove it. */
 @Composable
 fun AttachedImages(items: List<Upload>, onRemove: (Upload) -> Unit) {
     if (items.isEmpty()) return
@@ -93,6 +98,7 @@ private val EMOJI = listOf(
     "🔥", "⚡", "✨", "💯", "🎉", "🚀", "👀", "💎", "🌱", "☕", "🍻", "🍕", "🐸", "🦤", "🌽", "₿",
 )
 
+/** The first character as people see it, so emoji made of several code points stay whole. */
 private fun firstGrapheme(text: String): String {
     val breaks = BreakIterator.getCharacterInstance()
     breaks.setText(text)

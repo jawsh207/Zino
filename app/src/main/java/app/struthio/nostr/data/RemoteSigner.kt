@@ -1,3 +1,8 @@
+/*
+ * Signing in with a remote signer (NIP-46): the private key stays in another app or service, and
+ * Zino asks it over relays to sign and to encrypt or decrypt. Covers bunker:// links,
+ * nostrconnect:// links to scan, and the encrypted request and reply messages.
+ */
 package app.struthio.nostr.data
 
 import app.struthio.nostr.core.Draft
@@ -41,6 +46,7 @@ class RemoteSigner(
 
     val clientPubkey: String get() = client.pubkey
 
+    /** Stops listening for the signer's replies. */
     fun close() = session.close()
 
     /** Lets the signer move the connection to relays it prefers, as the NIP asks clients to. */
@@ -52,6 +58,10 @@ class RemoteSigner(
         session.close()
     }
 
+    /**
+     * Asks the signer to sign a draft, and checks the result is exactly what was asked, by the
+     * right account.
+     */
     override suspend fun sign(draft: Draft, background: Boolean): Event {
         val unsigned = JSONObject()
             .put("kind", draft.kind)
@@ -67,9 +77,11 @@ class RemoteSigner(
         return event
     }
 
+    /** Asks the signer to encrypt text to [peer]. */
     override suspend fun nip44Encrypt(plaintext: String, peer: String): String =
         session.request("nip44_encrypt", listOf(peer, plaintext))
 
+    /** Asks the signer to decrypt text from [peer]. */
     override suspend fun nip44Decrypt(payload: String, peer: String, background: Boolean): String =
         session.request("nip44_decrypt", listOf(peer, payload))
 
@@ -91,6 +103,7 @@ class RemoteSigner(
             listen()
         }
 
+        /** Listens on the signer's relays for its replies to this app. */
         private fun listen() {
             listener?.let(pool::close)
             listener = pool.subscribe(
@@ -110,6 +123,7 @@ class RemoteSigner(
             }
         }
 
+        /** Stops listening and gives up on any requests still waiting. */
         fun close() {
             listener?.let(pool::close)
             listener = null
@@ -117,6 +131,10 @@ class RemoteSigner(
             waiting.clear()
         }
 
+        /**
+         * Sends one request to the signer and waits for its answer, failing at once if the app
+         * isn't open.
+         */
         suspend fun request(method: String, params: List<String>, timeoutMs: Long = REQUEST_MS): String {
             // In the background Zino has no connections, so the signer can't be reached; say so now
             // rather than after a long wait.
@@ -162,13 +180,16 @@ class RemoteSigner(
         /** Shown by the signer when it lists connected apps. */
         val METADATA: String = JSONObject().put("name", "Zino").put("url", "https://github.com/jawsh207/Zino").toString()
 
+        /** A new random key for this app's side of the conversation. */
         fun newClientKey(): ByteArray = ByteArray(32).also { random.nextBytes(it) }
 
+        /** A random one-time secret for a nostrconnect:// link. */
         fun randomSecret(): String = Hex.encode(ByteArray(8).also { random.nextBytes(it) })
 
         /** A `bunker://` link: the signer's key, its relays and a one-time secret. */
         data class Bunker(val remote: String, val relays: List<String>, val secret: String?)
 
+        /** Reads a bunker:// link, or returns null if it has no valid signer key or relay. */
         fun parseBunker(text: String): Bunker? {
             val trimmed = text.trim()
             if (!trimmed.startsWith("bunker://")) return null
@@ -186,6 +207,7 @@ class RemoteSigner(
 
         /** The `nostrconnect://` link Zino shows for a signer to scan or open. */
         fun nostrConnectUri(clientPubkey: String, relays: List<String>, secret: String): String {
+            /** URL-encodes a value for the link. */
             fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8")
             return buildString {
                 append("nostrconnect://").append(clientPubkey).append('?')

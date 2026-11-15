@@ -1,3 +1,8 @@
+/*
+ * How the richer post kinds are read: picture posts (NIP-68), video posts (NIP-71), long-form
+ * articles (NIP-23), media details from imeta tags (NIP-92), and which posts belong under each tab
+ * on a profile.
+ */
 package app.struthio.nostr.core
 
 /** One `imeta` tag (NIP-92) as name to values; a name like `image` or `fallback` may repeat. */
@@ -11,8 +16,10 @@ fun imetas(event: Event): List<Map<String, List<String>>> = event.tags.filter { 
     fields
 }
 
+/** The first non-blank value for [name] in an imeta tag. */
 private fun Map<String, List<String>>.one(name: String) = this[name]?.firstOrNull()?.takeIf { it.isNotBlank() }
 
+/** Width over height from a `dim` like 1920x1080, or null. */
 private fun aspectOf(dim: String?): Float? {
     val parts = dim?.split('x')?.mapNotNull { it.trim().toFloatOrNull() } ?: return null
     if (parts.size != 2 || parts[1] <= 0f) return null
@@ -82,6 +89,7 @@ fun formatDuration(seconds: Double): String {
 /** NIP-23: what an article card shows. */
 data class Article(val title: String, val summary: String?, val image: String?, val publishedAt: Long?)
 
+/** An article's title, summary, picture and publish date, or null if [event] isn't an article. */
 fun article(event: Event): Article? {
     if (event.kind != Kind.ARTICLE) return null
     val title = titleOf(event) ?: event.content.lineSequence().firstOrNull { it.isNotBlank() }?.trimStart('#', ' ')?.take(120)
@@ -101,6 +109,7 @@ enum class ProfileTab(val label: String, val empty: String) {
     BOOSTS("Boosts", "No boosts yet."),
     GALLERY("Gallery", "No pictures or videos yet.");
 
+    /** True if [event] belongs under this tab. */
     fun shows(event: Event): Boolean = when (this) {
         // Their own posts: notes, polls, pictures, videos and articles that start something.
         POSTS -> event.kind in Kind.POSTS && threadRef(event).root == null

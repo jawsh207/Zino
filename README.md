@@ -60,7 +60,11 @@ Not used on purpose: NIP-04, NIP-06, NIP-08, NIP-26, NIP-96 and relay lists insi
 - Signature checks are skipped only for events already verified in the session.
 - Photos are re-encoded before upload, which removes EXIF data such as location.
 - Sockets close shortly after the app leaves the screen. Between scheduled checks, nothing runs in the background.
-- One APK per CPU architecture; the launcher icon is vector only.
+- One APK per CPU architecture.
+
+## How it's built
+
+[ARCHITECTURE.md](ARCHITECTURE.md) maps the code: how screens, the database and relays fit together, and which file does what.
 
 ## Testing on a device
 

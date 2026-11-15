@@ -1,3 +1,6 @@
+/*
+ * The menu on each post (copy link, delete, report), and the Bookmarks screen.
+ */
 package app.struthio.nostr.ui
 
 import androidx.compose.foundation.layout.Arrangement
@@ -47,6 +50,7 @@ private val REPORT_TYPES = listOf(
     "other" to "Something else",
 )
 
+/** The three-dot menu on a post: copy its link, delete your own (NIP-09), or report it (NIP-56). */
 @Composable
 fun NoteMenu(event: Event) {
     val core = LocalCore.current
@@ -143,6 +147,7 @@ fun NoteMenu(event: Event) {
     }
 }
 
+/** Your bookmarked posts (NIP-51). */
 @Composable
 fun BookmarksScreen() {
     val core = LocalCore.current

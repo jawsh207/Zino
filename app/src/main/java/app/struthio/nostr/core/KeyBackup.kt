@@ -1,3 +1,8 @@
+/*
+ * Password-protected key backups, the ncryptsec format from NIP-49: scrypt to turn a password into
+ * a key, and XChaCha20-Poly1305 to seal the private key with it. Everything is implemented here,
+ * so no crypto library is needed.
+ */
 package app.struthio.nostr.core
 
 import java.math.BigInteger
@@ -16,6 +21,10 @@ object KeyBackup {
     /** 2 says this app doesn't track whether the key was ever handled insecurely. */
     private const val KEY_SECURITY: Byte = 2
 
+    /**
+     * Seals [secret] with [password] as an ncryptsec string. [logN] sets how slow guessing is: 16
+     * means 65,536 rounds.
+     */
     fun encrypt(secret: ByteArray, password: String, logN: Int = LOG_N): String {
         val salt = randomBytes(16)
         val nonce = randomBytes(24)
@@ -39,8 +48,10 @@ object KeyBackup {
         return XChaCha20Poly1305.open(key, nonce, ad, data.copyOfRange(43, data.size)).also { key.fill(0) }
     }
 
+    /** The password in Unicode NFKC form, so it gives the same key however it was typed. */
     private fun normalized(password: String) = Normalizer.normalize(password, Normalizer.Form.NFKC).toByteArray()
 
+    /** PBKDF2 with HMAC-SHA256 and one round, the way scrypt uses it. */
     private fun pbkdf2(password: ByteArray, salt: ByteArray, length: Int): ByteArray {
         val out = ByteArray(length)
         var filled = 0
@@ -55,6 +66,10 @@ object KeyBackup {
         return out
     }
 
+    /**
+     * scrypt: turns a password into a key in a way that's deliberately slow and memory-hungry, so
+     * guessing is expensive.
+     */
     internal fun scrypt(password: ByteArray, salt: ByteArray, logN: Int, r: Int = 8): ByteArray {
         val n = 1 shl logN
         val words = 32 * r
@@ -79,6 +94,7 @@ object KeyBackup {
         return pbkdf2(password, b, 32)
     }
 
+    /** scrypt's BlockMix step over 2r blocks of 64 bytes. */
     private fun blockMix(b: IntArray, y: IntArray, x: IntArray, z: IntArray, r: Int) {
         b.copyInto(x, 0, (2 * r - 1) * 16, 2 * r * 16)
         for (i in 0 until 2 * r) {
@@ -92,8 +108,10 @@ object KeyBackup {
         }
     }
 
+    /** Rotates a 32-bit word left by [c] bits. */
     private fun rotl(v: Int, c: Int) = (v shl c) or (v ushr (32 - c))
 
+    /** The Salsa20/8 core that BlockMix runs on each block. */
     private fun salsa8(b: IntArray, x: IntArray) {
         b.copyInto(x)
         repeat(4) {
@@ -124,6 +142,9 @@ internal object XChaCha20Poly1305 {
     private val CLAMP = BigInteger("0ffffffc0ffffffc0ffffffc0fffffff", 16)
     private val MAX_TAG = BigInteger.ONE.shiftLeft(128)
 
+    /**
+     * XChaCha20 for [input], plus the one-time Poly1305 key from the first block of the keystream.
+     */
     private fun stream(key: ByteArray, nonce: ByteArray, input: ByteArray): Pair<ByteArray, ByteArray> {
         val subkey = ChaCha20.hchacha(key, nonce.copyOfRange(0, 16))
         val inner = ByteArray(4) + nonce.copyOfRange(16, 24)
@@ -132,9 +153,15 @@ internal object XChaCha20Poly1305 {
         return out.copyOfRange(0, 32) to out.copyOfRange(64, out.size)
     }
 
+    /** Bytes read as a little-endian number. */
     private fun little(bytes: ByteArray) = BigInteger(1, bytes.reversedArray())
 
+    /**
+     * The Poly1305 tag over the associated data and the sealed bytes, as AEAD constructions lay
+     * them out.
+     */
     private fun tag(polyKey: ByteArray, ad: ByteArray, sealed: ByteArray): ByteArray {
+        /** Pads to a multiple of 16 bytes with zeros. */
         fun padded(data: ByteArray) = data + ByteArray((16 - data.size % 16) % 16)
         val lengths = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN).putLong(ad.size.toLong()).putLong(sealed.size.toLong()).array()
         val message = padded(ad) + padded(sealed) + lengths
@@ -151,11 +178,13 @@ internal object XChaCha20Poly1305 {
         return ByteArray(16) { bytes.getOrElse(it) { 0 } }
     }
 
+    /** Encrypts and appends the 16-byte tag. */
     fun seal(key: ByteArray, nonce: ByteArray, ad: ByteArray, plain: ByteArray): ByteArray {
         val (polyKey, cipher) = stream(key, nonce, plain)
         return cipher + tag(polyKey, ad, cipher)
     }
 
+    /** Checks the tag and decrypts, or returns null if anything was changed. */
     fun open(key: ByteArray, nonce: ByteArray, ad: ByteArray, sealed: ByteArray): ByteArray? {
         if (sealed.size < 16) return null
         val cipher = sealed.copyOfRange(0, sealed.size - 16)

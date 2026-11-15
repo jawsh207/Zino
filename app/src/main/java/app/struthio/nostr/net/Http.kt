@@ -1,3 +1,7 @@
+/*
+ * Fetching over HTTPS: files and pictures with size limits, parts of video files, link previews,
+ * and the on-phone cache of downloads.
+ */
 package app.struthio.nostr.net
 
 import org.json.JSONObject
@@ -13,6 +17,7 @@ object Http {
     private const val MAX_FILE = 32 * 1024 * 1024
     private const val PAGE_START = 96 * 1024
 
+    /** Opens an https connection with Zino's timeouts. Plain http is refused. */
     private fun open(url: String, followRedirects: Boolean): HttpURLConnection {
         require(url.startsWith("https://")) { "only https is allowed" }
         return (URL(url).openConnection() as HttpURLConnection).apply {
@@ -23,6 +28,7 @@ object Http {
         }
     }
 
+    /** Reads the whole response, failing if it's bigger than [limit]. */
     private fun read(conn: HttpURLConnection, limit: Int): ByteArray = conn.inputStream.use { input ->
         val out = ByteArrayOutputStream()
         val buffer = ByteArray(16 * 1024)
@@ -51,6 +57,7 @@ object Http {
     fun json(url: String, followRedirects: Boolean = true): JSONObject =
         JSONObject(String(fetch(open(url, followRedirects), MAX_JSON)))
 
+    /** Downloads a file. */
     fun bytes(url: String): ByteArray = fetch(open(url, true), MAX_FILE)
 
     /**
@@ -80,6 +87,7 @@ object Http {
         }
     }
 
+    /** Reads at most [limit] bytes of the response. */
     private fun readUpTo(conn: HttpURLConnection, limit: Int): ByteArray = conn.inputStream.use { input ->
         val out = ByteArrayOutputStream()
         val buffer = ByteArray(16 * 1024)
@@ -98,6 +106,7 @@ object Http {
         return String(fetch(conn, MAX_JSON))
     }
 
+    /** What a link points at: its type and, for web pages, the start of the page. */
     class Page(val type: String, val html: String?)
 
     /**
@@ -152,6 +161,7 @@ object Http {
         return file
     }
 
+    /** Deletes the oldest cached files until the cache fits in [maxBytes]. */
     fun trimCache(dir: File, maxBytes: Long) {
         val files = dir.listFiles()?.sortedByDescending { it.lastModified() } ?: return
         var total = 0L

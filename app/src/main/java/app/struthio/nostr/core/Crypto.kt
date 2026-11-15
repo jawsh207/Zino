@@ -1,3 +1,8 @@
+/*
+ * The cryptography Zino needs, written here rather than pulled from libraries: hex encoding,
+ * hashing, Schnorr keys and signatures (through libsecp256k1), the ChaCha20 cipher, and NIP-44
+ * encryption, which private messages and remote signing are built on.
+ */
 package app.struthio.nostr.core
 
 import fr.acinq.secp256k1.Secp256k1
@@ -9,9 +14,11 @@ import java.util.Base64
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
+/** Converts between bytes and lowercase hex text, the form keys and ids take in Nostr. */
 object Hex {
     private const val CHARS = "0123456789abcdef"
 
+    /** Bytes as lowercase hex. */
     fun encode(bytes: ByteArray): String {
         val out = CharArray(bytes.size * 2)
         for (i in bytes.indices) {
@@ -22,6 +29,7 @@ object Hex {
         return String(out)
     }
 
+    /** Hex text back to bytes; fails on anything that isn't an even run of hex digits. */
     fun decode(hex: String): ByteArray {
         require(hex.length % 2 == 0) { "odd hex length" }
         return ByteArray(hex.length / 2) {
@@ -32,15 +40,19 @@ object Hex {
         }
     }
 
+    /** True for a 64-character lowercase hex string: the shape of a Nostr key or event id. */
     fun isKey(s: String?) = s != null && s.length == 64 && s.all { it in '0'..'9' || it in 'a'..'f' }
 }
 
 val secureRandom = SecureRandom()
 
+/** [n] bytes from the system's secure random source. */
 fun randomBytes(n: Int) = ByteArray(n).also { secureRandom.nextBytes(it) }
 
+/** The SHA-256 hash of [data]. */
 fun sha256(data: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(data)
 
+/** HMAC-SHA256 of the [parts], one after another, under [key]. */
 fun hmacSha256(key: ByteArray, vararg parts: ByteArray): ByteArray {
     val mac = Mac.getInstance("HmacSHA256")
     mac.init(SecretKeySpec(key, "HmacSHA256"))
@@ -50,6 +62,9 @@ fun hmacSha256(key: ByteArray, vararg parts: ByteArray): ByteArray {
 
 /** BIP-340 keys and signatures, through libsecp256k1. */
 object Keys {
+    /**
+     * A new random private key, retried in the rare case it falls outside the curve's valid range.
+     */
     fun generate(): ByteArray {
         while (true) {
             val key = randomBytes(32)
@@ -57,14 +72,18 @@ object Keys {
         }
     }
 
+    /** True if [key] is a usable 32-byte private key. */
     fun isValidSecret(key: ByteArray) = key.size == 32 && Secp256k1.secKeyVerify(key)
 
+    /** The public key for a private key, as hex: the x coordinate only, as Nostr uses. */
     fun publicKey(secret: ByteArray): String =
         Hex.encode(Secp256k1.pubkeyCreate(secret).copyOfRange(1, 33))
 
+    /** A BIP-340 Schnorr signature of a 32-byte [hash], with fresh randomness each time. */
     fun sign(hash: ByteArray, secret: ByteArray): ByteArray =
         Secp256k1.signSchnorr(hash, secret, randomBytes(32))
 
+    /** Checks a Schnorr signature; anything malformed counts as not valid. */
     fun verify(signature: ByteArray, hash: ByteArray, pubkey: ByteArray): Boolean = try {
         Secp256k1.verifySchnorr(signature, hash, pubkey)
     } catch (_: Exception) {
@@ -80,8 +99,10 @@ object Keys {
 
 /** ChaCha20 from RFC 8439, starting at block counter 0. */
 internal object ChaCha20 {
+    /** Rotates a 32-bit word left by [c] bits. */
     private fun rotl(v: Int, c: Int) = (v shl c) or (v ushr (32 - c))
 
+    /** ChaCha20's quarter round, mixing four words of the state. */
     private fun quarter(s: IntArray, a: Int, b: Int, c: Int, d: Int) {
         s[a] += s[b]; s[d] = rotl(s[d] xor s[a], 16)
         s[c] += s[d]; s[b] = rotl(s[b] xor s[c], 12)
@@ -110,6 +131,10 @@ internal object ChaCha20 {
         return out.array()
     }
 
+    /**
+     * Encrypts or decrypts (the same thing for a stream cipher) [input] with a 32-byte key and
+     * 12-byte nonce.
+     */
     fun apply(key: ByteArray, nonce: ByteArray, input: ByteArray): ByteArray {
         require(key.size == 32 && nonce.size == 12)
         val k = ByteBuffer.wrap(key).order(ByteOrder.LITTLE_ENDIAN)
@@ -149,9 +174,17 @@ object Nip44 {
     private val SALT = "nip44-v2".toByteArray()
     private const val MAX_PAYLOAD_CHARS = 2_000_000
 
+    /**
+     * The key two people share for NIP-44, from one's private key and the other's public key. It's
+     * the same from either side.
+     */
     fun conversationKey(secret: ByteArray, pubkeyHex: String): ByteArray =
         hmacSha256(SALT, Keys.sharedX(secret, pubkeyHex))
 
+    /**
+     * Splits one message's keys out of the conversation key and its nonce: cipher key, cipher nonce
+     * and MAC key.
+     */
     private fun messageKeys(conversationKey: ByteArray, nonce: ByteArray): Triple<ByteArray, ByteArray, ByteArray> {
         require(conversationKey.size == 32 && nonce.size == 32)
         // HKDF-expand for L = 76: three 32-byte blocks.
@@ -162,6 +195,7 @@ object Nip44 {
         return Triple(okm.copyOfRange(0, 32), okm.copyOfRange(32, 44), okm.copyOfRange(44, 76))
     }
 
+    /** How long a message is padded to, so its length gives away only roughly how big it is. */
     internal fun paddedLength(unpadded: Long): Long {
         if (unpadded <= 32) return 32
         var nextPower = 1L
@@ -170,6 +204,7 @@ object Nip44 {
         return chunk * ((unpadded - 1) / chunk + 1)
     }
 
+    /** Prefixes the length and pads the message out to its padded size. */
     private fun pad(plain: ByteArray): ByteArray {
         require(plain.isNotEmpty()) { "invalid plaintext length" }
         val prefix = if (plain.size >= 65536) 6 else 2
@@ -185,6 +220,7 @@ object Nip44 {
         return out
     }
 
+    /** Undoes [pad], refusing anything whose length doesn't add up. */
     private fun unpad(padded: ByteArray): ByteArray {
         val buffer = ByteBuffer.wrap(padded)
         val first = buffer.short.toInt() and 0xffff
@@ -205,6 +241,7 @@ object Nip44 {
         return padded.copyOfRange(prefix, prefix + length.toInt())
     }
 
+    /** Encrypts text for a conversation, as a NIP-44 version 2 payload in base64. */
     fun encrypt(plaintext: String, conversationKey: ByteArray, nonce: ByteArray = randomBytes(32)): String {
         val (chachaKey, chachaNonce, hmacKey) = messageKeys(conversationKey, nonce)
         val cipher = ChaCha20.apply(chachaKey, chachaNonce, pad(plaintext.toByteArray()))
@@ -212,6 +249,10 @@ object Nip44 {
         return Base64.getEncoder().encodeToString(byteArrayOf(2) + nonce + cipher + mac)
     }
 
+    /**
+     * Decrypts a NIP-44 payload, after checking its version, size and MAC. Throws if any check
+     * fails.
+     */
     fun decrypt(payload: String, conversationKey: ByteArray): String {
         require(payload.isNotEmpty() && payload[0] != '#') { "unknown version" }
         require(payload.length in 132..MAX_PAYLOAD_CHARS) { "invalid payload size" }

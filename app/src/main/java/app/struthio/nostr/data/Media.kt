@@ -1,3 +1,7 @@
+/*
+ * Uploading photos and files to Blossom media servers (NIP-B7 and BUD-02). Photos are turned
+ * upright and re-encoded first, which also removes hidden details like where they were taken.
+ */
 package app.struthio.nostr.data
 
 import android.content.Context
@@ -19,20 +23,27 @@ import java.io.ByteArrayOutputStream
 import java.net.URI
 import java.util.Base64
 
+/**
+ * What a server returns for an upload: its address, hash, type, size and, for images, dimensions.
+ */
 data class Upload(val url: String, val sha256: String, val type: String, val size: Int, val width: Int, val height: Int)
 
+/** A file ready to upload: its bytes and type, and dimensions if it's an image. */
 class Prepared(val bytes: ByteArray, val type: String, val width: Int, val height: Int)
 
 /** Blossom uploads (NIP-B7). Photos are re-encoded first, which drops EXIF data such as location. */
 class MediaUploader(private val core: Core, private val context: Context) {
 
+    /** Reads a picked file's bytes. */
     private fun read(uri: Uri): ByteArray =
         context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw UserError("Could not open that file.")
 
+    /** Which way up the photo was taken, from its EXIF data. */
     private fun orientation(bytes: ByteArray): Int = runCatching {
         ExifInterface(bytes.inputStream()).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
     }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
 
+    /** The photo turned the right way up. */
     private fun upright(bitmap: Bitmap, orientation: Int): Bitmap {
         val matrix = Matrix()
         when (orientation) {
@@ -46,6 +57,7 @@ class MediaUploader(private val core: Core, private val context: Context) {
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
+    /** Turns a picked photo into an upright, size-limited JPEG with no EXIF data. */
     suspend fun prepareImage(uri: Uri): Prepared = withContext(Dispatchers.IO) {
         val bytes = read(uri)
         if (bytes.size > MAX_BYTES) throw UserError("That file is too large.")
@@ -69,6 +81,7 @@ class MediaUploader(private val core: Core, private val context: Context) {
         Prepared(out.toByteArray(), "image/jpeg", sized.width, sized.height)
     }
 
+    /** Reads a picked file to send as it is; photos go through [prepareImage] instead. */
     suspend fun prepareFile(uri: Uri): Prepared = withContext(Dispatchers.IO) {
         val type = context.contentResolver.getType(uri) ?: "application/octet-stream"
         if (type.startsWith("image/") && type != "image/gif") return@withContext prepareImage(uri)
@@ -77,6 +90,7 @@ class MediaUploader(private val core: Core, private val context: Context) {
         Prepared(bytes, type, 0, 0)
     }
 
+    /** Uploads a prepared file and keeps the image dimensions with the result. */
     suspend fun upload(prepared: Prepared): Upload {
         val done = upload(prepared.bytes, prepared.type)
         return done.copy(width = prepared.width, height = prepared.height)

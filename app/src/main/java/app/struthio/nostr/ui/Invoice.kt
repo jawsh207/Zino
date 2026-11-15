@@ -1,3 +1,7 @@
+/*
+ * Lightning invoices in posts and messages: a card with the amount and description, and a button
+ * to pay through the connected wallet or open another wallet app.
+ */
 package app.struthio.nostr.ui
 
 import android.content.Intent

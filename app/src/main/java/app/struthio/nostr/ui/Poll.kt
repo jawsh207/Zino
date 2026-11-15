@@ -1,3 +1,7 @@
+/*
+ * Polls (NIP-88): voting on a poll in a post, seeing the results, and making a new poll in the
+ * composer.
+ */
 package app.struthio.nostr.ui
 
 import androidx.compose.foundation.background
@@ -43,6 +47,7 @@ import app.struthio.nostr.core.nowSeconds
 
 private const val MAX_OPTIONS = 8
 
+/** A poll in a post: its options to vote on, or the results once you've voted or it has ended. */
 @Composable
 fun PollCard(event: Event, poll: Poll) {
     val core = LocalCore.current
@@ -56,6 +61,7 @@ fun PollCard(event: Event, poll: Poll) {
     var busy by remember(event.id) { mutableStateOf(false) }
     val picked = remember(event.id) { mutableStateListOf<String>() }
     val showResults = ended || result.mine.isNotEmpty() || event.pubkey == me
+    /** Sends your vote. */
     fun send(choices: List<String>) {
         busy = true
         scope.act(nav) {
@@ -124,6 +130,7 @@ fun PollCard(event: Event, poll: Poll) {
     }
 }
 
+/** Time left in short form, like 2d or 5h. */
 internal fun timeLeft(seconds: Long): String = when {
     seconds >= 86400 -> "${seconds / 86400}d"
     seconds >= 3600 -> "${seconds / 3600}h"
@@ -139,6 +146,7 @@ class PollDraft {
     val filled: List<String> get() = options.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
 }
 
+/** The options and settings for a new poll. */
 @Composable
 fun PollEditor(draft: PollDraft) {
     Column(Modifier.fillMaxWidth().padding(horizontal = PageGutter), verticalArrangement = Arrangement.spacedBy(6.dp)) {

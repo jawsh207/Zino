@@ -1,3 +1,8 @@
+/*
+ * Two small profile extras: statuses (NIP-38), saying what someone is up to or listening to, and
+ * linked accounts (NIP-39), naming accounts elsewhere that someone says are theirs, with where to
+ * find the proof.
+ */
 package app.struthio.nostr.core
 
 /** NIP-38: what someone is doing or listening to, from a kind 30315 event. */
@@ -43,6 +48,7 @@ data class Identity(val platform: String, val name: String, val proof: String) {
     val label: String
         get() = PLATFORMS[platform] ?: platform
 
+    /** The account as a NIP-39 `i` tag. */
     fun tag(): List<String> = listOf("i", "$platform:$name", proof)
 
     companion object {

@@ -1,3 +1,7 @@
+/*
+ * Media in posts: the full-screen picture viewer with pinch to zoom, the video player, and link
+ * preview cards.
+ */
 package app.struthio.nostr.ui
 
 import android.content.Intent
@@ -63,6 +67,7 @@ import androidx.compose.ui.window.DialogProperties
 import app.struthio.nostr.core.LinkInfo
 import app.struthio.nostr.core.formatDuration
 
+/** One picture that can be pinched, zoomed and moved, and swiped down to close. */
 @Composable
 private fun ZoomableImage(url: String, onDismiss: () -> Unit) {
     val bitmap by rememberImage(url, 1100.dp)

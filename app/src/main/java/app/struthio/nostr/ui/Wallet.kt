@@ -1,3 +1,7 @@
+/*
+ * The Wallet tab: connect a wallet with Nostr Wallet Connect (NIP-47), see the balance and recent
+ * payments, pay an invoice, and receive with a new invoice shown as a QR code.
+ */
 package app.struthio.nostr.ui
 
 import androidx.compose.foundation.layout.Arrangement
@@ -50,6 +54,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import java.text.NumberFormat
 import kotlinx.coroutines.launch
 
+/**
+ * The Wallet tab: the balance, payments, and send and receive buttons, or how to connect a wallet.
+ */
 @Composable
 fun WalletScreen(pending: String?, onConsumed: () -> Unit) {
     val core = LocalCore.current
@@ -148,6 +155,7 @@ fun WalletScreen(pending: String?, onConsumed: () -> Unit) {
     }
 }
 
+/** Connecting a wallet by pasting or scanning its link. */
 @Composable
 private fun ConnectWallet() {
     val core = LocalCore.current
@@ -191,6 +199,7 @@ private fun ConnectWallet() {
     }
 }
 
+/** Paying a lightning invoice, pasted or scanned. */
 @Composable
 private fun SendSheet(onDismiss: () -> Unit) {
     val core = LocalCore.current
@@ -238,6 +247,7 @@ private fun SendSheet(onDismiss: () -> Unit) {
     }
 }
 
+/** Making an invoice to receive sats, shown as a QR code to share. */
 @Composable
 private fun ReceiveSheet(onDismiss: () -> Unit) {
     val core = LocalCore.current

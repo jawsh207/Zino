@@ -1,3 +1,9 @@
+/*
+ * Core is everything behind the screens: the signed-in account and how it signs, the database, the
+ * relays, and every action the app takes. Screens read its state (profiles, follows, mutes, relay
+ * lists, counters) and call its functions to post, react, zap, follow, message, look things up and
+ * change settings.
+ */
 package app.struthio.nostr.data
 
 import android.content.Context
@@ -99,6 +105,10 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.net.URLEncoder
 
+/**
+ * What Zino shows for a person: their name, picture, about text, Nostr address (and whether it
+ * checked out), lightning address, banner, website and custom emoji.
+ */
 data class Profile(
     val pubkey: String,
     val name: String,
@@ -115,6 +125,7 @@ data class Profile(
     val emoji: Map<String, String> = emptyMap(),
 )
 
+/** A problem worth showing the user as it is, like "Sign in first." */
 class UserError(message: String) : Exception(message)
 
 /** Everything behind the screens: account, cache, relays and the actions on them. */
@@ -177,8 +188,11 @@ class Core(private val context: Context) {
         // reconnect at once instead of each waiting out a timeout on a dead connection.
         runCatching {
             context.getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(
+                /** Hears about network changes from Android. */
                 object : ConnectivityManager.NetworkCallback() {
+                    /** A network came up. */
                     override fun onAvailable(network: Network) = pool.networkAvailable(network)
+                    /** A network went away. */
                     override fun onLost(network: Network) = pool.networkLost(network)
                 },
             )
@@ -202,6 +216,10 @@ class Core(private val context: Context) {
         }
     }
 
+    /**
+     * Stores events from relays in batches, then reacts to the new ones. A batch that fails to
+     * store is skipped.
+     */
     private suspend fun ingestLoop() {
         val batch = ArrayList<Pair<Event, String>>(256)
         while (true) {
@@ -219,10 +237,14 @@ class Core(private val context: Context) {
         }
     }
 
+    /** Queues an event from a relay for storing. Any part of the app can call this. */
     fun ingest(event: Event, relay: String) {
         incoming.trySend(event to relay)
     }
 
+    /**
+     * Applies a new event to what's on screen: profiles, your follows, relays, mutes and bookmarks.
+     */
     private fun onNewEvent(e: Event) {
         when (e.kind) {
             Kind.METADATA -> publishProfile(parseProfile(e))
@@ -239,14 +261,17 @@ class Core(private val context: Context) {
         }
     }
 
+    /** Fills an empty relay list with Zino's defaults. */
     private fun RelayList.orDefaults() = RelayList(read.ifEmpty { DEFAULT_RELAYS }, write.ifEmpty { DEFAULT_RELAYS })
 
+    /** Takes up a new follow list. */
     private fun applyFollows(e: Event) {
         val set = e.tags.values("p").filter(Hex::isKey).toSet()
         store.setFollows(set)
         follows.value = set
     }
 
+    /** Takes up a new mute list, including its private entries. */
     private suspend fun applyMutes(e: Event) {
         val set = HashSet(e.tags.values("p"))
         val me = signer.value
@@ -262,6 +287,10 @@ class Core(private val context: Context) {
         muted.value = set
     }
 
+    /**
+     * The private entries of a mute or bookmark list, decrypted (NIP-51). Lists in the old NIP-04
+     * format are skipped.
+     */
     private suspend fun privateItems(e: Event, name: String): List<String> {
         val active = signer.value ?: return emptyList()
         if (e.content.isBlank() || e.content.contains("?iv=")) return emptyList()
@@ -273,10 +302,15 @@ class Core(private val context: Context) {
         }.getOrDefault(emptyList())
     }
 
+    /** Takes up a new bookmark list, public and private entries together. */
     private suspend fun applyBookmarks(e: Event) {
         bookmarks.value = (e.tags.values("e") + privateItems(e, "e")).filter(Hex::isKey).toSet()
     }
 
+    /**
+     * Shows a profile on screen, keeping its checked tick only while the Nostr address is
+     * unchanged, and checks the address afresh when it's new.
+     */
     private fun publishProfile(profile: Profile) {
         main.post {
             val old = profiles[profile.pubkey]
@@ -296,12 +330,14 @@ class Core(private val context: Context) {
         }
     }
 
+    /** True if the profile's Nostr address (NIP-05) points back to this person. */
     private fun nip05Matches(profile: Profile) = profile.nip05?.let(::nip05Owner) == profile.pubkey
 
     /** Who a typed NIP-05 address belongs to, according to its domain. */
     suspend fun resolveAddress(text: String): String? =
         if (isNip05Address(text)) withContext(Dispatchers.IO) { nip05Owner(text) } else null
 
+    /** Looks up who a Nostr address like name@example.com belongs to, from its site. */
     private fun nip05Owner(address: String): String? {
         val at = address.lastIndexOf('@').takeIf { it > 0 } ?: return null
         val name = address.substring(0, at).lowercase()
@@ -315,8 +351,10 @@ class Core(private val context: Context) {
     /** "_@example.com" is the NIP-05 way of saying "example.com". */
     private fun handleOf(profile: Profile) = profile.nip05?.removePrefix("_@")
 
+    /** A profile from a kind 0 event. */
     private fun parseProfile(e: Event): Profile {
         val o = runCatching { JSONObject(e.content) }.getOrDefault(JSONObject())
+        /** A non-blank text field from the profile. */
         fun field(name: String) = o.optString(name).takeIf { it.isNotBlank() && it != "null" }
         return Profile(
             e.pubkey,
@@ -347,6 +385,7 @@ class Core(private val context: Context) {
         return if (profile != null && stripEmoji(profile.name, profile.emoji).isNotEmpty()) profile.name else displayName(pubkey)
     }
 
+    /** A short npub to stand in for a name, like npub1abc…wxyz. */
     private fun shortNpub(pubkey: String) = Nip19.npub(pubkey).let { it.take(10) + "…" + it.takeLast(4) }
 
     /** Asks for a profile; cards call this as they appear, and requests are grouped. */
@@ -372,11 +411,13 @@ class Core(private val context: Context) {
         }
     }
 
+    /** A person's relay list, from memory or the database. */
     fun relaysOf(pubkey: String): RelayList? = synchronized(relayLists) { relayLists[pubkey] }
         ?: store.latest(pubkey, Kind.RELAYS)?.let(::parseRelayList)?.also { list ->
             synchronized(relayLists) { relayLists[pubkey] = list }
         }
 
+    /** Fetches relay lists for people whose lists aren't stored yet. */
     private suspend fun ensureRelayLists(pubkeys: Collection<String>) {
         val known = store.latestOfKind(pubkeys, Kind.RELAYS)
         synchronized(relayLists) { known.forEach { relayLists[it.pubkey] = parseRelayList(it) } }
@@ -405,7 +446,9 @@ class Core(private val context: Context) {
         return out
     }
 
+    /** The relays you read from. */
     fun readRelays(): Set<String> = myRelays.value.read.toSet()
+    /** The relays you post to. */
     fun writeRelays(): Set<String> = myRelays.value.write.toSet()
 
     /** Counters for a note; cards call this as they appear. */
@@ -438,6 +481,7 @@ class Core(private val context: Context) {
         }
     }
 
+    /** Reloads like, reply, boost and zap counts for these posts from the database. */
     private fun refreshStats(ids: List<String>) {
         ids.chunked(200).forEach { chunk ->
             val fresh = store.stats(chunk, me)
@@ -445,6 +489,7 @@ class Core(private val context: Context) {
         }
     }
 
+    /** Finds which zap services people use, so zap receipts can be checked. A few at a time. */
     private suspend fun resolveProviders(ids: List<String>) {
         val now = nowSeconds()
         store.unresolvedRecipients(ids, now).take(12).forEach { pubkey ->
@@ -461,6 +506,10 @@ class Core(private val context: Context) {
 
     // Account
 
+    /**
+     * Signs back in on start: with a signer app, a remote signer, a read-only npub, or the key on
+     * the phone.
+     */
     private suspend fun restoreAccount() {
         val external = prefs.getString("signer_package", null)
         val externalKey = prefs.getString("signer_pubkey", null)
@@ -484,6 +533,9 @@ class Core(private val context: Context) {
         wallet.restore()
     }
 
+    /**
+     * Makes [active] the signed-in account: loads its stored lists, then connects and catches up.
+     */
     private suspend fun activate(active: Signer) {
         val pubkey = active.pubkey
         sessionLoaded.value = false
@@ -496,6 +548,7 @@ class Core(private val context: Context) {
         Notifier.schedule(context, notifyMinutes())
     }
 
+    /** Takes up the account's follows and relays from the database. */
     private fun loadCachedLists(pubkey: String) {
         store.latest(pubkey, Kind.FOLLOWS)?.let(::applyFollows)
         store.latest(pubkey, Kind.RELAYS)?.let { myRelays.value = parseRelayList(it).orDefaults() }
@@ -503,6 +556,7 @@ class Core(private val context: Context) {
         trustedSet.value = store.trusted()
     }
 
+    /** Takes up the account's mutes and bookmarks from the database. */
     private suspend fun applyCachedMutes(pubkey: String) {
         store.latest(pubkey, Kind.MUTES)?.let { applyMutes(it) }
         store.latest(pubkey, Kind.BOOKMARKS)?.let { applyBookmarks(it) }
@@ -533,6 +587,7 @@ class Core(private val context: Context) {
         adoptSecret(secret)
     }
 
+    /** Your private key sealed with a password (NIP-49), or null if the key isn't on this phone. */
     suspend fun exportEncrypted(password: String): String? {
         val secret = secure.get(KEY_SECRET) ?: return null
         return withContext(Dispatchers.Default) {
@@ -544,6 +599,10 @@ class Core(private val context: Context) {
         }
     }
 
+    /**
+     * Signs in with what was typed: an nsec, an ncryptsec (which asks for its password), or an npub
+     * for read-only.
+     */
     suspend fun signIn(input: String) {
         val text = input.trim()
         val entity = Nip19.decode(text)
@@ -560,6 +619,7 @@ class Core(private val context: Context) {
         adoptSecret(secret)
     }
 
+    /** Stores a private key safely and signs in with it. */
     private suspend fun adoptSecret(secret: ByteArray) {
         if (!Keys.isValidSecret(secret)) throw UserError("That key is not valid.")
         secure.put(KEY_SECRET, secret)
@@ -567,11 +627,13 @@ class Core(private val context: Context) {
         activate(LocalSigner(secret))
     }
 
+    /** Signs in through a signer app (NIP-55). */
     suspend fun signInExternal(pubkey: String, packageName: String) {
         prefs.edit().putString("signer_package", packageName).putString("signer_pubkey", pubkey).remove("read_only_pubkey").apply()
         activate(ExternalSigner(context, pubkey, packageName))
     }
 
+    /** Your private key as an nsec, or null if it isn't on this phone. */
     suspend fun exportSecret(): String? = secure.get(KEY_SECRET)?.let(Nip19::nsec)
 
     /** A remote signer wants the user to approve on a web page (NIP-46 auth challenge). */
@@ -617,6 +679,10 @@ class Core(private val context: Context) {
             true
         }
 
+    /**
+     * Finishes connecting to a remote signer: learns the account's key, moves to the signer's
+     * preferred relays, saves the session and signs in.
+     */
     private suspend fun finishRemoteSignIn(session: RemoteSigner.Session, clientKey: ByteArray, remote: String, relays: List<String>) {
         // The signer's own key isn't necessarily the account's: the NIP says to ask.
         val user = session.request("get_public_key", emptyList()).trim().lowercase()
@@ -659,6 +725,7 @@ class Core(private val context: Context) {
         taken
     }
 
+    /** Signs out and clears everything stored for the account. */
     suspend fun signOut() {
         // A courtesy to the remote signer; its client key goes either way, as the NIP requires.
         (signer.value as? RemoteSigner)?.let { runCatching { it.logout() } }
@@ -718,6 +785,10 @@ class Core(private val context: Context) {
         }
     }
 
+    /**
+     * Listens on your messaging relays for private messages, from just before the last one already
+     * read.
+     */
     private fun startDmSubscription() {
         val pubkey = me ?: return
         val relays = dmRelays.value.toSet()
@@ -772,6 +843,10 @@ class Core(private val context: Context) {
     /** Signed events no relay confirmed, by what they say, so a retry reuses them. */
     private val unconfirmed = ConcurrentHashMap<String, Event>()
 
+    /**
+     * Sends a post to the inboxes of people it mentions, so they see it even if they don't read
+     * your relays.
+     */
     private suspend fun reachTagged(event: Event, tagged: List<String>, sent: Set<String>) {
         ensureRelayLists(tagged)
         val inboxes = (tagged.flatMap { relaysOf(it)?.read.orEmpty().take(3) }.toSet() - sent).take(MAX_PUBLISH_RELAYS).toSet()
@@ -793,10 +868,13 @@ class Core(private val context: Context) {
         }
     }
 
+    /** Your public key, or a "Sign in first" error. */
     private fun author(): String = me ?: throw UserError("Sign in first.")
 
+    /** Relays to name with a mention of someone: where they post. */
     fun mentionRelays(pubkey: String): List<String> = relaysOf(pubkey)?.write.orEmpty().take(2)
 
+    /** A relay where a post can be found, to include with a link to it. */
     fun hintFor(id: String): String = store.relayOf(id)?.takeIf { it.isNotEmpty() } ?: writeRelays().firstOrNull() ?: ""
 
     /** NIP-09. Relays decide whether to honour this, which the confirmation says. */
@@ -836,11 +914,13 @@ class Core(private val context: Context) {
         applyBookmarks(published)
     }
 
+    /** Adds uploaded media to a post: their addresses in the text and imeta tags (NIP-92). */
     private fun withMedia(text: String, media: List<Upload>): Pair<String, List<List<String>>> {
         val body = (listOf(text.trim()) + media.map { it.url }).filter { it.isNotEmpty() }.joinToString("\n")
         return body to media.map { imetaTag(it.url, it.type, it.sha256, it.width, it.height, it.size) }
     }
 
+    /** Posts a note, with media and a content warning if chosen. */
     suspend fun postNote(text: String, media: List<Upload> = emptyList(), sensitive: Boolean = false): Event {
         val (body, imeta) = withMedia(text, media)
         val (content, tags) = prepareContent(body)
@@ -848,6 +928,7 @@ class Core(private val context: Context) {
         return publish(Draft(author(), nowSeconds(), Kind.NOTE, tags + imeta + warning, content))
     }
 
+    /** Replies to a post: a note for notes, a comment (NIP-22) for anything else. */
     suspend fun reply(parent: Event, text: String, media: List<Upload> = emptyList()): Event {
         val (body, imeta) = withMedia(text, media)
         val (content, extra) = prepareContent(body)
@@ -855,6 +936,7 @@ class Core(private val context: Context) {
         return publish(Draft(author(), nowSeconds(), kind, (tags + extra).distinct() + imeta, content))
     }
 
+    /** Quotes a post in a new note (NIP-18). */
     suspend fun quote(target: Event, text: String, media: List<Upload> = emptyList()): Event {
         val hint = hintFor(target.id)
         val reference = Nip19.nevent(target.id, listOf(hint).filter { it.isNotEmpty() }, target.pubkey)
@@ -863,6 +945,7 @@ class Core(private val context: Context) {
         return publish(Draft(author(), nowSeconds(), Kind.NOTE, tags + imeta, content))
     }
 
+    /** Boosts a post: kind 6 for notes, kind 16 for anything else (NIP-18). */
     suspend fun boost(target: Event) {
         val hint = hintFor(target.id)
         val generic = target.kind != Kind.NOTE
@@ -876,6 +959,7 @@ class Core(private val context: Context) {
         }
     }
 
+    /** Reacts to a post with an emoji (NIP-25). */
     suspend fun react(target: Event, content: String = DEFAULT_REACTION) {
         val hint = hintFor(target.id)
         val tags = listOf(
@@ -899,6 +983,10 @@ class Core(private val context: Context) {
         tentatively(target.id, hidden) { publish(Draft(me, nowSeconds(), Kind.DELETION, tags, "")) }
     }
 
+    /**
+     * Saves profile fields, keeping anything else the profile already had. Fetches the latest
+     * version first so nothing set in another app is lost.
+     */
     suspend fun saveProfile(fields: Map<String, String>) {
         val pubkey = author()
         latestFromRelays(pubkey, Kind.METADATA)
@@ -1006,6 +1094,10 @@ class Core(private val context: Context) {
     private fun safeToStartList(): Boolean =
         prefs.getBoolean("account_created_here", false) || prefs.getBoolean("confirmed_no_follow_list", false)
 
+    /**
+     * Follows or unfollows someone, starting from the newest follow list on your relays so no
+     * follow is lost.
+     */
     suspend fun setFollowing(pubkey: String, follow: Boolean) = followsLock.withLock {
         val me = author()
         if (!latestFromRelays(me, Kind.FOLLOWS)) throw UserError("Could not reach your relays. Try again.")
@@ -1020,6 +1112,7 @@ class Core(private val context: Context) {
         Unit
     }
 
+    /** Mutes or unmutes someone, starting from the newest mute list on your relays. */
     suspend fun setMuted(pubkey: String, mute: Boolean) {
         val me = author()
         if (!latestFromRelays(me, Kind.MUTES)) throw UserError("Could not reach your relays. Try again.")
@@ -1029,6 +1122,7 @@ class Core(private val context: Context) {
         muted.value = if (mute) muted.value + pubkey else muted.value - pubkey
     }
 
+    /** A NIP-65 relay list event: each relay marked read, write or both. */
     private fun relayListDraft(pubkey: String, list: RelayList): Draft {
         val tags = (list.read + list.write).distinct().map { url ->
             when {
@@ -1040,9 +1134,11 @@ class Core(private val context: Context) {
         return Draft(pubkey, nowSeconds(), Kind.RELAYS, tags, "")
     }
 
+    /** A NIP-17 messaging relay list event. */
     private fun dmRelayDraft(pubkey: String, relays: List<String>) =
         Draft(pubkey, nowSeconds(), Kind.DM_RELAYS, relays.map { listOf("relay", it) }, "")
 
+    /** Saves your relay list, sending it to lookup relays too so others can find it. */
     suspend fun saveRelays(list: RelayList) {
         val pubkey = author()
         publish(relayListDraft(pubkey, list), extraRelays = (lookupRelays() + DEFAULT_RELAYS + myRelays.value.write).toSet())
@@ -1050,6 +1146,7 @@ class Core(private val context: Context) {
         startSession()
     }
 
+    /** Saves your messaging relays and starts listening on them. */
     suspend fun saveDmRelays(relays: List<String>) {
         val pubkey = author()
         publish(dmRelayDraft(pubkey, relays), extraRelays = lookupRelays().toSet() + relays)
@@ -1059,8 +1156,13 @@ class Core(private val context: Context) {
 
     // Lightning
 
+    /**
+     * What a lightning address's server says about paying it (LNURL-pay): where to ask for
+     * invoices, the limits, and its zap key if it supports zaps.
+     */
     data class LnurlInfo(val callback: String, val min: Long, val max: Long, val nostrPubkey: String?, val url: String)
 
+    /** The LNURL-pay address for a profile's lightning address (lud16) or LNURL (lud06). */
     private fun lnurlEndpoint(profile: Profile): String? {
         profile.lud16?.let {
             val at = it.lastIndexOf('@')
@@ -1069,6 +1171,7 @@ class Core(private val context: Context) {
         return profile.lud06?.let(Bech32Lnurl::decode)
     }
 
+    /** Asks a lightning address's server how to pay it. */
     private fun lnurlInfo(profile: Profile): LnurlInfo? {
         val url = lnurlEndpoint(profile) ?: return null
         val o = Http.json(url)
@@ -1076,6 +1179,7 @@ class Core(private val context: Context) {
         return LnurlInfo(o.getString("callback"), o.optLong("minSendable"), o.optLong("maxSendable"), nostrKey, url)
     }
 
+    /** Someone's profile, from memory, the database, or relays. */
     private suspend fun profileOf(pubkey: String): Profile {
         withContext(Dispatchers.Main) { profiles[pubkey] }?.let { return it }
         store.latest(pubkey, Kind.METADATA)?.let { return parseProfile(it) }
@@ -1130,6 +1234,7 @@ class Core(private val context: Context) {
         return emptyList()
     }
 
+    /** Forgets a post's counters for a moment and reloads them, so a zap just sent shows up. */
     private fun statsFetchedReset(id: String) {
         synchronized(statsFetched) { statsFetched.remove(id) }
         scope.launch {
@@ -1183,6 +1288,10 @@ class Core(private val context: Context) {
         return null
     }
 
+    /**
+     * Seals a message and gift-wraps it for one recipient (NIP-59): only they can open it, and the
+     * outside shows neither sender nor time.
+     */
     private suspend fun wrapFor(rumorJson: String, recipient: String, active: Signer): Event {
         val sealContent = active.nip44Encrypt(rumorJson, recipient)
         val seal = active.sign(Draft(active.pubkey, pastTime(), Kind.SEAL, emptyList(), sealContent))
@@ -1192,8 +1301,10 @@ class Core(private val context: Context) {
         return wrapper.signNow(Draft(wrapper.pubkey, pastTime(), Kind.GIFT_WRAP, listOf(listOf("p", recipient)), content))
     }
 
+    /** A time up to two days back, so gift wraps don't reveal when they were sent. */
     private fun pastTime() = nowSeconds() - secureRandom.nextInt(2 * 86400)
 
+    /** Someone's messaging relays (NIP-17), fetched from their relays and the lookup relays. */
     private suspend fun dmRelaysOf(pubkey: String): List<String> {
         pool.query(
             (relaysOf(pubkey)?.write.orEmpty() + lookupRelays() + DEFAULT_RELAYS).toSet(),
@@ -1288,10 +1399,15 @@ class Core(private val context: Context) {
         FileCipher.decrypt(data, Hex.decode(file.key), Hex.decode(file.nonce))
     }
 
+    /** Turns on private messages with Zino's default messaging relays. */
     suspend fun setUpMessages() = saveDmRelays(DEFAULT_DM_RELAYS)
 
     // Lookups
 
+    /**
+     * A post by id: from the database, or from the hinted relays, the author's relays and the
+     * defaults.
+     */
     suspend fun fetchEvent(id: String, hints: List<String> = emptyList(), author: String? = null): Event? = withContext(Dispatchers.IO) {
         store.event(id)?.let { return@withContext it }
         val relays = hints.mapNotNull(::normalizeRelay).toMutableSet()
@@ -1340,6 +1456,9 @@ class Core(private val context: Context) {
         return fetchAddress(kind, author, parts.getOrNull(2).orEmpty(), hints)
     }
 
+    /**
+     * An addressable post (like an article) by kind, author and `d` tag, wherever it can be found.
+     */
     suspend fun fetchAddress(kind: Int, author: String, d: String, hints: List<String> = emptyList()): Event? =
         withContext(Dispatchers.IO) {
             val relays = hints.mapNotNull(::normalizeRelay).toMutableSet()
@@ -1476,6 +1595,7 @@ class Core(private val context: Context) {
         }
     }
 
+    /** True if [word] appears in these bytes; used to find where a video file keeps its index. */
     private fun ByteArray.containsAscii(word: String): Boolean {
         val target = word.toByteArray()
         outer@ for (i in 0..size - target.size) {
@@ -1485,13 +1605,16 @@ class Core(private val context: Context) {
         return false
     }
 
+    /** Whether link previews are on. */
     fun linkPreviewsEnabled() = prefs.getBoolean("link_previews", true)
 
+    /** Turns link previews on or off. */
     fun setLinkPreviews(on: Boolean) = prefs.edit().putBoolean("link_previews", on).apply()
 
     /** Off unless chosen, as playing loads the video site's own player and its tracking. */
     fun videoEmbedsEnabled() = prefs.getBoolean("video_embeds", false)
 
+    /** Turns playing videos from other sites in the app on or off. */
     fun setVideoEmbeds(on: Boolean) = prefs.edit().putBoolean("video_embeds", on).apply()
 
     /** Open Graph data for a link, cached on disk so that each site is asked once. */
@@ -1519,18 +1642,22 @@ class Core(private val context: Context) {
         info
     }
 
+    /** Text with HTML entities decoded and tags removed. */
     private fun decodeHtml(text: String) =
         android.text.Html.fromHtml(text, android.text.Html.FROM_HTML_MODE_LEGACY).toString().trim()
 
     // Trusted network
 
+    /** Whether discovery feeds only show people in your trusted network. */
     fun trustFilterEnabled() = prefs.getBoolean("trust_filter", true)
 
+    /** Turns the trusted network filter on or off. */
     fun setTrustFilter(on: Boolean) = prefs.edit().putBoolean("trust_filter", on).apply()
 
     /** With no follows yet there is no network to go by, so nothing is hidden. */
     fun trustFilterActive() = trustFilterEnabled() && trustedSet.value.size > follows.value.size
 
+    /** The people currently in your trusted network. */
     fun trustedNow(): Set<String> = trustedSet.value
 
     /** Reads what the people you follow follow, keeps only the result, and does so once a day. */
@@ -1560,8 +1687,10 @@ class Core(private val context: Context) {
 
     // Background notifications
 
+    /** How often notifications are checked, in minutes; 0 is never. */
     fun notifyMinutes() = prefs.getInt("notify_minutes", Notifier.DEFAULT_MINUTES)
 
+    /** Sets how often notifications are checked, and reschedules. */
     fun setNotifyMinutes(minutes: Int) {
         prefs.edit().putInt("notify_minutes", minutes).apply()
         Notifier.schedule(context, minutes)
@@ -1690,11 +1819,13 @@ class Core(private val context: Context) {
         report.toString()
     }
 
+    /** Your media servers (Blossom, kind 10063), or Zino's default. */
     fun mediaServers(): List<String> {
         val own = me?.let { store.latest(it, Kind.MEDIA_SERVERS) }?.tags?.values("server")?.filter { it.startsWith("https://") }
         return own?.takeIf { it.isNotEmpty() } ?: DEFAULT_MEDIA_SERVERS
     }
 
+    /** Saves your media servers. */
     suspend fun saveMediaServers(servers: List<String>) {
         publish(Draft(author(), nowSeconds(), Kind.MEDIA_SERVERS, servers.map { listOf("server", it) }, ""), extraRelays = lookupRelays().toSet())
     }
@@ -1703,13 +1834,16 @@ class Core(private val context: Context) {
     fun lookupRelays(): List<String> =
         prefs.getString("lookup_relays", null)?.split('\n')?.filter { it.isNotEmpty() }?.takeIf { it.isNotEmpty() } ?: DEFAULT_LOOKUP_RELAYS
 
+    /** Saves which relays to use for looking up profiles and relay lists. */
     fun saveLookupRelays(relays: List<String>) {
         prefs.edit().putString("lookup_relays", relays.joinToString("\n")).apply()
     }
 
+    /** A search relay list event (kind 10007). */
     private fun searchRelayDraft(pubkey: String, relays: List<String>) =
         Draft(pubkey, nowSeconds(), Kind.SEARCH_RELAYS, relays.map { listOf("relay", it) }, "")
 
+    /** Saves your search relays. */
     suspend fun saveSearchRelays(relays: List<String>) {
         publish(searchRelayDraft(author(), relays))
     }
@@ -1742,8 +1876,10 @@ class Core(private val context: Context) {
         return store.alerts(me, muted.value, 150).filter { it.event.createdAt > since && it.event.id !in read }.map { it.event.id }.toSet()
     }
 
+    /** How many unread messages each chat has. */
     fun unreadRooms(me: String): Map<String, Int> = store.unreadRooms(me, prefs.getLong("dms_read", 0L))
 
+    /** Fetches votes on a poll from its relays. */
     suspend fun loadVotes(event: Event, poll: Poll) {
         val relays = poll.relays.ifEmpty { readRelays().toList() }.take(MAX_FEED_RELAYS).toSet()
         pool.query(relays, listOf(Filter(kinds = listOf(Kind.POLL_VOTE), tags = mapOf("e" to listOf(event.id)))), onEvent = ::ingest)
@@ -1763,11 +1899,13 @@ class Core(private val context: Context) {
         }
     }
 
+    /** Posts a poll. */
     suspend fun postPoll(question: String, options: List<String>, multiple: Boolean, endsAt: Long?): Event {
         val (content, tags) = prepareContent(question)
         return publish(Draft(author(), nowSeconds(), Kind.POLL, tags + pollTags(options, multiple, endsAt, writeRelays().take(4)), content))
     }
 
+    /** Marks one notification as read. */
     fun readAlert(id: String) {
         scope.launch {
             store.markRead(id, nowSeconds())
@@ -1775,6 +1913,7 @@ class Core(private val context: Context) {
         }
     }
 
+    /** Marks a chat as read up to [upTo]. */
     fun readRoom(room: String, upTo: Long) {
         scope.launch {
             store.markRead("room:$room", upTo)
@@ -1782,6 +1921,7 @@ class Core(private val context: Context) {
         }
     }
 
+    /** Marks every notification as read. */
     fun readAllAlerts(me: String) {
         scope.launch {
             val newest = store.alerts(me, muted.value, 1).firstOrNull()?.event?.createdAt ?: 0L
@@ -1791,6 +1931,7 @@ class Core(private val context: Context) {
         }
     }
 
+    /** Marks every chat as read. */
     fun readAllRooms(me: String) {
         scope.launch {
             val newest = store.rooms(me).maxOfOrNull { it.last.createdAt } ?: 0L
@@ -1820,6 +1961,7 @@ class Core(private val context: Context) {
         append(AppLog.text())
     }
 
+    /** What Zino uses a relay for, in words, for the relay screen. */
     fun relayUses(url: String): List<String> = buildList {
         if (url in readRelays()) add("Reading your feed")
         if (url in writeRelays()) add("Posting your notes")
@@ -1828,6 +1970,7 @@ class Core(private val context: Context) {
         if (url in lookupRelays()) add("Profile lookup")
     }
 
+    /** Your search relays, or Zino's defaults. */
     fun searchRelays(): Set<String> {
         val own = me?.let { store.latest(it, Kind.SEARCH_RELAYS) }?.tags?.values("relay")?.mapNotNull(::normalizeRelay)
         return (own?.takeIf { it.isNotEmpty() } ?: DEFAULT_SEARCH_RELAYS).toSet()

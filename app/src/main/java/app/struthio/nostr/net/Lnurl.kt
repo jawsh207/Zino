@@ -1,11 +1,16 @@
+/*
+ * Lightning addresses and LNURLs, as used for zaps (NIP-57).
+ */
 package app.struthio.nostr.net
 
 import app.struthio.nostr.core.Bech32
 
 /** LUD-01: an LNURL is a bech32-encoded https URL. */
 object Bech32Lnurl {
+    /** Turns a URL into an lnurl string. */
     fun encode(url: String) = Bech32.encode("lnurl", url.toByteArray())
 
+    /** The URL inside an lnurl string, or null if it isn't one. */
     fun decode(lnurl: String): String? = runCatching {
         val (hrp, data) = Bech32.decode(lnurl)
         if (hrp == "lnurl") String(data) else null

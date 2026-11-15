@@ -1,3 +1,8 @@
+/*
+ * Relay screens: editing your general (NIP-65), messaging, search and profile lookup relays, each
+ * with how it's answering, and a details screen per relay with its own information (NIP-11), data
+ * use and uptime.
+ */
 package app.struthio.nostr.ui
 
 import app.struthio.nostr.core.parseContent
@@ -60,11 +65,13 @@ import kotlinx.coroutines.withContext
 
 private const val CHECKING = -1L
 
+/** A relay being edited, with whether you read from it and post to it. */
 private class EditRelay(val url: String, read: Boolean, write: Boolean) {
     var read by mutableStateOf(read)
     var write by mutableStateOf(write)
 }
 
+/** The relay's own description of itself (NIP-11), once fetched. */
 @Composable
 private fun rememberRelayInfo(url: String): RelayInfo? {
     val core = LocalCore.current
@@ -88,6 +95,9 @@ private fun summaryLine(s: RelayStats.Summary): String? {
     ).joinToString(" · ")
 }
 
+/**
+ * How a relay is doing, in words: its response time, a sign-in note, or that it's not answering.
+ */
 private fun statusText(ping: Long?, info: RelayInfo?): String = when {
     ping == CHECKING -> "Checking…"
     ping != null -> "$ping ms"
@@ -95,6 +105,7 @@ private fun statusText(ping: Long?, info: RelayInfo?): String = when {
     else -> "Not answering"
 }
 
+/** The colour of the dot beside a relay's status. */
 @Composable
 private fun statusColor(ping: Long?, info: RelayInfo?): Color = when {
     ping == CHECKING -> MaterialTheme.colorScheme.outlineVariant
@@ -103,6 +114,7 @@ private fun statusColor(ping: Long?, info: RelayInfo?): Color = when {
     else -> MaterialTheme.colorScheme.error
 }
 
+/** One relay in a list: its icon, address and status. Tapping opens its details. */
 @Composable
 private fun RelayRow(url: String, onRemove: () -> Unit) {
     val nav = LocalNav.current
@@ -132,6 +144,7 @@ private fun RelayRow(url: String, onRemove: () -> Unit) {
     }
 }
 
+/** A field for adding a relay by its address. */
 @Composable
 private fun AddRelay(onAdd: (String) -> Unit) {
     val nav = LocalNav.current
@@ -150,6 +163,7 @@ private fun AddRelay(onAdd: (String) -> Unit) {
     }
 }
 
+/** A save button that shows a message once saved. */
 @Composable
 private fun SaveButton(enabled: Boolean, saved: String, save: suspend () -> Unit) {
     val nav = LocalNav.current
@@ -171,6 +185,7 @@ private fun SaveButton(enabled: Boolean, saved: String, save: suspend () -> Unit
     ) { Text("Save") }
 }
 
+/** A list of relays of one kind that can be edited and saved. */
 @Composable
 private fun RelayGroup(title: String, hint: String, initial: List<String>, saved: String, save: suspend (List<String>) -> Unit) {
     val relays = remember { mutableStateListOf<String>().apply { addAll(initial) } }
@@ -182,6 +197,7 @@ private fun RelayGroup(title: String, hint: String, initial: List<String>, saved
     }
 }
 
+/** Your relay lists: general, messaging, search and profile lookup. */
 @Composable
 fun RelaysScreen() {
     val core = LocalCore.current
@@ -233,6 +249,7 @@ fun RelaysScreen() {
     }
 }
 
+/** One labelled line of relay details. */
 @Composable
 private fun Fact(label: String, value: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -241,12 +258,17 @@ private fun Fact(label: String, value: String) {
     }
 }
 
+/** Yes, no, or that the relay doesn't say. */
 private fun stated(value: Boolean?, yes: String, no: String) = when (value) {
     true -> yes
     false -> no
     null -> "Not stated"
 }
 
+/**
+ * Everything about one relay: what it says about itself, its limits, data used and how often it
+ * answered.
+ */
 @Composable
 fun RelayInfoScreen(url: String) {
     val core = LocalCore.current

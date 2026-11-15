@@ -1,3 +1,7 @@
+/*
+ * Zino's own WebSocket client, the connection every relay uses. It does the TLS setup, the
+ * handshake, and reading and writing frames, with no outside library.
+ */
 package app.struthio.nostr.net
 
 import java.io.BufferedInputStream
@@ -34,6 +38,7 @@ internal fun <T> alternateFamilies(items: List<T>, isFirstFamily: (T) -> Boolean
     return List(maxOf(lead.size, follow.size)) { listOfNotNull(lead.getOrNull(it), follow.getOrNull(it)) }.flatten()
 }
 
+/** One WebSocket connection, run on its own thread. */
 class WebSocket(
     private val url: String,
     private val onOpen: () -> Unit,
@@ -52,10 +57,15 @@ class WebSocket(
 
     private var closedNotified = false
 
+    /** Connects in the background. */
     fun connect() {
         Thread({ run() }, "ws").apply { isDaemon = true }.start()
     }
 
+    /**
+     * Connects, completes the handshake and reads messages until the connection ends, then reports
+     * how it ended.
+     */
     private fun run() {
         var failure: Throwable? = null
         try {
@@ -120,6 +130,10 @@ class WebSocket(
         throw failure
     }
 
+    /**
+     * Turns a plain connection into an encrypted one (TLS), checking the server's certificate and
+     * name.
+     */
     private fun upgradeTls(plain: Socket, host: String, port: Int): Socket {
         val factory = SSLSocketFactory.getDefault() as SSLSocketFactory
         val tls = factory.createSocket(plain, host, port, true) as SSLSocket
@@ -134,6 +148,7 @@ class WebSocket(
         return tls
     }
 
+    /** The HTTP upgrade that starts a WebSocket, checking the server's answer. */
     private fun handshake(uri: URI, host: String, port: Int, secure: Boolean, input: InputStream, out: OutputStream) {
         val key = Base64.getEncoder().encodeToString(ByteArray(16).also(random::nextBytes))
         val path = (uri.rawPath?.takeIf { it.isNotEmpty() } ?: "/") + (uri.rawQuery?.let { "?$it" } ?: "")
@@ -157,6 +172,7 @@ class WebSocket(
         if (accept != acceptFor(key)) throw IOException("bad accept header")
     }
 
+    /** Reads one line of the server's HTTP answer. */
     private fun readLine(input: InputStream): String {
         val out = ByteArrayOutputStream(64)
         while (true) {
@@ -169,6 +185,7 @@ class WebSocket(
         return out.toString("UTF-8")
     }
 
+    /** Reads exactly [length] bytes. */
     private fun readFully(input: InputStream, buffer: ByteArray, length: Int) {
         var offset = 0
         while (offset < length) {
@@ -192,6 +209,7 @@ class WebSocket(
         }
     }
 
+    /** Reads frames and puts messages back together, answering pings. */
     private fun readLoop(input: InputStream) {
         var message: ByteArrayOutputStream? = null
         val header = ByteArray(8)
@@ -248,6 +266,7 @@ class WebSocket(
         false
     }
 
+    /** Sends one frame, masked as clients must. */
     private fun writeFrame(opcode: Int, payload: ByteArray) {
         synchronized(writeLock) {
             val out = output ?: throw IOException("not connected")
@@ -285,6 +304,7 @@ class WebSocket(
         shutdown()
     }
 
+    /** Closes the connection. */
     private fun shutdown() {
         output = null
         runCatching { socket?.close() }
@@ -302,6 +322,7 @@ class WebSocket(
         private const val OP_PING = 9
         private const val OP_PONG = 10
 
+        /** The answer the server must give to our handshake key. */
         fun acceptFor(key: String): String = Base64.getEncoder().encodeToString(
             MessageDigest.getInstance("SHA-1")
                 .digest((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").toByteArray()),

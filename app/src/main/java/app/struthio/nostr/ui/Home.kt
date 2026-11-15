@@ -1,3 +1,7 @@
+/*
+ * The Home tab: the Following, Trending, Global and Relays feeds, the search pill, and the
+ * scrolling list of posts that every feed uses, with its new-posts pill.
+ */
 package app.struthio.nostr.ui
 
 import androidx.compose.animation.AnimatedVisibility
@@ -73,6 +77,7 @@ private val SOURCES = listOf(
     "Relays" to FeedSource.MyRelays,
 )
 
+/** The Home tab, with its feed tabs and a button to write a post. */
 @Composable
 fun HomeScreen() {
     val core = LocalCore.current
@@ -117,6 +122,7 @@ fun HomeScreen() {
     }
 }
 
+/** The search bar at the top, with the settings button beside it. */
 @Composable
 private fun SearchPill(onSearch: () -> Unit, onSettings: () -> Unit) {
     Surface(
@@ -168,6 +174,7 @@ private fun FeedSelector(selected: Int, onSelect: (Int) -> Unit) {
     }
 }
 
+/** A scrolling list of posts that loads more near the end, with a pill to jump up to new posts. */
 @Composable
 fun NoteList(
     feed: Feed,
