@@ -159,3 +159,4 @@ Message notifications never say who sent the message or what it says.
   - `smoke.sh` walks through the main screens.
   - `kinds-check.sh` checks how the different post kinds are drawn.
   - `embed-check.sh` checks video embeds.
+- **`docs-check.py`** runs on every push and fails the build if a file, class or function has no description. See [CONTRIBUTING.md](CONTRIBUTING.md).

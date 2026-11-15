@@ -46,6 +46,9 @@ jobs:
         with:
           fetch-depth: 0 # full history + tags, for release notes
 
+      - name: Check the code is described
+        run: python3 scripts/docs-check.py
+
       - name: Detect release
         shell: bash
         env:

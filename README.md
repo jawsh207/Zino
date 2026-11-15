@@ -64,7 +64,7 @@ Not used on purpose: NIP-04, NIP-06, NIP-08, NIP-26, NIP-96 and relay lists insi
 
 ## How it's built
 
-[ARCHITECTURE.md](ARCHITECTURE.md) maps the code: how screens, the database and relays fit together, and which file does what.
+[ARCHITECTURE.md](ARCHITECTURE.md) maps the code: how screens, the database and relays fit together, and which file does what. [CONTRIBUTING.md](CONTRIBUTING.md) has the rules for changes, including keeping the code described.
 
 ## Testing on a device
 
