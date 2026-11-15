@@ -68,7 +68,14 @@ class Subscription internal constructor(
 }
 
 /** A relay's answer to a post: accepted or not, and its message. */
-data class PublishResult(val ok: Boolean, val message: String)
+data class PublishResult(val ok: Boolean, val message: String, val retryable: Boolean = false) {
+    companion object {
+        /** Answers that mean "not now" rather than "no": trying again later may work (NIP-01). */
+        fun meansLater(message: String) =
+            message.startsWith("rate-limited:") || message.startsWith("error:") || message == RESTING
+        const val RESTING = "relay is unavailable for now"
+    }
+}
 
 /** All relay connections. Sockets exist only while something needs them and the app is in front. */
 class RelayPool(
@@ -249,9 +256,15 @@ class RelayPool(
                 }
                 AppLog.add("kind ${event.kind} not taken: ${each.joinToString("; ")}")
                 val silent = pending.values.any { !it.isCompleted }
+                // Worth another try later when some relay never answered, or every answer was "not now".
+                val later = silent || pending.values.all { PublishResult.meansLater(it.getCompleted().message) }
                 answer.complete(
-                    PublishResult(false, if (silent) "No relay answered in time. Check your connection and try again." else
-                        pending.values.first().getCompleted().message.ifBlank { "No relay accepted this." }),
+                    PublishResult(
+                        false,
+                        if (silent) "No relay answered in time. Check your connection and try again." else
+                            pending.values.first().getCompleted().message.ifBlank { "No relay accepted this." },
+                        retryable = later,
+                    ),
                 )
             }
         }
@@ -501,7 +514,7 @@ class RelayPool(
             val deferred = CompletableDeferred<PublishResult>()
             val send = synchronized(lock) {
                 if (cooling()) {
-                    deferred.complete(PublishResult(false, "relay is unavailable for now"))
+                    deferred.complete(PublishResult(false, PublishResult.RESTING))
                     return deferred
                 }
                 pending[event.id] = Pending(event, deferred)

@@ -1,21 +1,103 @@
 /*
- * The application object. It creates Core, which holds the app's state, once for the whole
- * process, and starts the log.
+ * The application object. It keeps the list of accounts and the Core of the one in use, starts the
+ * log, and switches accounts: the old Core is closed and a new one opens on the other account's
+ * own files. Screens watch [ZinoApp.current], so they redraw for the new account.
  */
 package app.struthio.nostr
 
 import android.app.Application
+import android.os.Handler
+import android.os.Looper
+import app.struthio.nostr.data.Accounts
 import app.struthio.nostr.data.Core
+import app.struthio.nostr.data.Notifier
 import app.struthio.nostr.net.AppLog
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
-/** Holds Core for the whole app. */
+/** Holds the accounts and the Core of the one in use. */
 class ZinoApp : Application() {
-    val core: Core by lazy { Core(this) }
+    val accounts: Accounts by lazy { Accounts(this) }
+    private val state = MutableStateFlow<Core?>(null)
+    private var started = 0
+
+    /** The Core of the account in use, for screens to watch. */
+    val current: StateFlow<Core?> get() = state.also { core }
+
+    /** The Core of the account in use, opened the first time it's needed. */
+    val core: Core
+        get() = state.value ?: synchronized(this) { state.value ?: open(accounts.activeId).also { state.value = it } }
 
     /** Starts the log as the app starts. */
     override fun onCreate() {
         super.onCreate()
         AppLog.start(File(filesDir, "log.txt"))
+    }
+
+    /** A Core for one account, which tells us when that account signs out. */
+    private fun open(id: String) = Core(this, id, accounts, ::signedOut)
+
+    /** The app came to the front. */
+    fun appStarted() {
+        started++
+        core.pool.activityStarted()
+    }
+
+    /** The app went away. */
+    fun appStopped() {
+        started--
+        core.pool.activityStopped()
+    }
+
+    /** Closes the account in use and opens [id]. Call on the main thread. */
+    fun switchTo(id: String) {
+        val old = core
+        if (old.accountId == id) return
+        accounts.setActive(id)
+        val new = open(id)
+        if (started > 0) new.pool.activityStarted()
+        state.value = new
+        old.close()
+        // Notifications belong to the account they came from.
+        Notifier.clear(this)
+        AppLog.add("switched account")
+    }
+
+    /** Adds an empty account and switches to it, which shows sign-in. */
+    fun addAccount() = switchTo(accounts.add().id)
+
+    /**
+     * Gives up on an account that never signed in, as when sign-in is cancelled, and goes back to
+     * [previous].
+     */
+    fun cancelAdding(previous: String) {
+        val abandoned = core.accountId
+        switchTo(previous)
+        forget(abandoned)
+    }
+
+    /**
+     * An account signed out. With others on the phone it's removed and the most recently added
+     * signed-in one takes over; the last account just stays, empty, showing sign-in.
+     */
+    private fun signedOut(id: String) {
+        val others = accounts.list.value.filter { it.id != id }
+        if (others.isEmpty()) {
+            accounts.remove(id)
+            return
+        }
+        switchTo(others.lastOrNull { it.pubkey != null }?.id ?: others.last().id)
+        forget(id)
+    }
+
+    /** Takes an account off the list now, and deletes its files once its closed Core lets go of them. */
+    private fun forget(id: String) {
+        if (!accounts.remove(id)) return
+        Handler(Looper.getMainLooper()).postDelayed({ accounts.deleteFiles(id) }, REMOVE_DELAY_MS)
+    }
+
+    private companion object {
+        const val REMOVE_DELAY_MS = 15_000L
     }
 }

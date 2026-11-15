@@ -63,6 +63,10 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Logout
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.PersonAdd
+import androidx.compose.runtime.collectAsState
+import app.struthio.nostr.ZinoApp
 import androidx.compose.material.icons.rounded.Bookmarks
 import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -150,6 +154,41 @@ private fun SettingRow(
     )
 }
 
+/**
+ * The other accounts on this phone, each a tap away, and a row for adding one. Switching closes
+ * this account's screens and opens the other's.
+ */
+@Composable
+private fun AccountsGroup() {
+    val core = LocalCore.current
+    val nav = LocalNav.current
+    val app = LocalContext.current.applicationContext as ZinoApp
+    val accounts by app.accounts.list.collectAsState()
+    val others = accounts.filter { it.id != core.accountId && it.pubkey != null }
+    val rows = others.map { account ->
+        val pubkey = account.pubkey!!
+        val row: @Composable (Shape) -> Unit = { shape ->
+            CardRow(
+                shape,
+                {
+                    nav.stack.clear()
+                    app.switchTo(account.id)
+                },
+                headlineContent = { Text(account.name?.takeIf { it.isNotBlank() } ?: core.displayName(pubkey), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                supportingContent = { Text("Switch to this account") },
+                leadingContent = { Avatar(pubkey, 40.dp) },
+            )
+        }
+        row
+    } + listOf<@Composable (Shape) -> Unit>({ shape ->
+        SettingRow(shape, Icons.Rounded.PersonAdd, "Add account", "Sign in to another account on this phone") {
+            nav.stack.clear()
+            app.addAccount()
+        }
+    })
+    Group("Accounts", *rows.toTypedArray())
+}
+
 /** A settings row with a switch. */
 @Composable
 private fun SwitchRow(shape: Shape, icon: ImageVector, title: String, summary: String, checked: Boolean, onChange: (Boolean) -> Unit) {
@@ -206,6 +245,7 @@ fun SettingsScreen() {
                     }) { Icon(Icons.Rounded.ContentCopy, "Copy npub") }
                 },
             )
+            AccountsGroup()
             Group(
                 "Account",
                 { SettingRow(it, Icons.Rounded.Bookmarks, "Bookmarks") { nav.push(Screen.Bookmarks) } },
@@ -686,6 +726,10 @@ fun Onboarding(modifier: Modifier = Modifier) {
     val core = LocalCore.current
     val nav = LocalNav.current
     val context = LocalContext.current
+    val app = context.applicationContext as ZinoApp
+    val accounts by app.accounts.list.collectAsState()
+    // Adding an account opens sign-in; this is the way back to the account you came from.
+    val previous = accounts.lastOrNull { it.id != core.accountId && it.pubkey != null }
     val scope = rememberCoroutineScope()
     var name by remember { mutableStateOf("") }
     var key by remember { mutableStateOf("") }
@@ -709,7 +753,15 @@ fun Onboarding(modifier: Modifier = Modifier) {
         modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp).imePadding(),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Spacer(Modifier.height(32.dp))
+        if (previous != null) {
+            TextButton({ app.cancelAdding(previous.id) }, enabled = !busy) {
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Back to ${previous.name?.takeIf { it.isNotBlank() } ?: core.displayName(previous.pubkey!!)}")
+            }
+        } else {
+            Spacer(Modifier.height(32.dp))
+        }
         Text("Zino", style = MaterialTheme.typography.displayMedium)
         Text("Fast, light Nostr.", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(16.dp))

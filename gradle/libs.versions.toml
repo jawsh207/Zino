@@ -11,6 +11,7 @@ secp256k1 = "0.24.0"
 zxing = "3.5.4"
 junit = "4.13.2"
 json = "20250517"
+robolectric = "4.14.1"
 
 [libraries]
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
@@ -24,6 +25,7 @@ secp256k1-jvm = { group = "fr.acinq.secp256k1", name = "secp256k1-kmp-jni-jvm", 
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 json = { group = "org.json", name = "json", version.ref = "json" }
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

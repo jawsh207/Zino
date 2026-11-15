@@ -1,7 +1,11 @@
 package app.struthio.nostr.net
 
+import app.struthio.nostr.core.Draft
 import app.struthio.nostr.core.Filter
+import app.struthio.nostr.core.Keys
 import app.struthio.nostr.core.Kind
+import app.struthio.nostr.core.LocalSigner
+import app.struthio.nostr.core.nowSeconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -11,6 +15,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.DataInputStream
@@ -19,8 +24,14 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.atomic.AtomicInteger
 
-/** A fake relay that speaks just enough of the protocol to drive the pool. */
-private class FakeRelay(private val onRequest: (JSONArray, (String) -> Unit, () -> Unit) -> Unit) {
+/**
+ * A fake relay that speaks just enough of the protocol to drive the pool. [onRequest] answers
+ * REQs; [onOther] answers everything else, like EVENT and NEG-OPEN.
+ */
+internal class FakeRelay(
+    private val onOther: (JSONArray, (String) -> Unit) -> Unit = { _, _ -> },
+    private val onRequest: (JSONArray, (String) -> Unit, () -> Unit) -> Unit = { _, _, _ -> },
+) {
     private val server = ServerSocket(0)
     val connections = AtomicInteger()
     val requests = AtomicInteger()
@@ -69,6 +80,8 @@ private class FakeRelay(private val onRequest: (JSONArray, (String) -> Unit, () 
                 if (message.getString(0) == "REQ") {
                     requests.incrementAndGet()
                     onRequest(message, { out.text(it) }, { s.close() })
+                } else {
+                    onOther(message) { out.text(it) }
                 }
             }
         }
@@ -148,6 +161,56 @@ class RelayPoolTest {
         delay(1200)
         assertEquals(17, relay.requests.get())
         subs.drop(5).forEach(pool::close)
+        relay.close()
+    }
+}
+
+/** What a failed post tells Core: whether keeping it and trying later can help. */
+class PublishRetryTest {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val pool = RelayPool(scope) { null }.apply { activityStarted() }
+    private val signer = LocalSigner(Keys.generate())
+
+    @After
+    fun tearDown() = scope.cancel()
+
+    /** A signed note to post. */
+    private fun note() = signer.signNow(Draft(signer.pubkey, nowSeconds(), Kind.NOTE, emptyList(), "hello"))
+
+    /** A relay that answers every post with [accepted] and [message]. */
+    private fun answering(accepted: Boolean, message: String) = FakeRelay(onOther = { m, send ->
+        if (m.getString(0) == "EVENT") send("""["OK","${m.getJSONObject(1).getString("id")}",$accepted,"$message"]""")
+    })
+
+    @Test
+    fun noAnswerIsWorthRetrying() = runBlocking {
+        val closedPort = ServerSocket(0).run { close(); localPort }
+        val result = pool.publishFirst(note(), setOf("ws://127.0.0.1:$closedPort"), timeoutMs = 1500)
+        assertFalse(result.ok)
+        assertTrue(result.retryable)
+    }
+
+    @Test
+    fun anOutrightRefusalIsNot() = runBlocking {
+        val relay = answering(false, "blocked: not on the list")
+        val result = pool.publishFirst(note(), setOf(relay.url), timeoutMs = 3000)
+        assertFalse(result.ok)
+        assertFalse(result.retryable)
+        assertEquals("blocked: not on the list", result.message)
+        relay.close()
+    }
+
+    @Test
+    fun rateLimitingIsWorthRetrying() = runBlocking {
+        val relay = answering(false, "rate-limited: slow down")
+        assertTrue(pool.publishFirst(note(), setOf(relay.url), timeoutMs = 3000).retryable)
+        relay.close()
+    }
+
+    @Test
+    fun anAcceptedPostIsOk() = runBlocking {
+        val relay = answering(true, "")
+        assertTrue(pool.publishFirst(note(), setOf(relay.url), timeoutMs = 3000).ok)
         relay.close()
     }
 }

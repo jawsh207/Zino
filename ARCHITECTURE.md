@@ -26,7 +26,16 @@ All code lives in `app/src/main/java/app/struthio/nostr/`, in four folders:
 3. Events are stored in batches in **Store**, the SQLite database. After each batch, Core sends a signal on `changes`.
 4. Screens read from the database through `liveQuery` (in `ui/Common.kt`), which runs its query again when `changes` fires. So what you see is always what's stored, and it shows up at once when the app opens, even offline.
 
-`ZinoApp` creates one `Core` for the whole app. `MainActivity` is the only Android screen; `ui/App.kt` draws everything inside it.
+`ZinoApp` keeps the list of accounts and one `Core` for the account in use. `MainActivity` is the only Android screen; `ui/App.kt` draws everything inside it.
+
+## Accounts
+
+Each account on the phone has its own database, settings and secrets files (`data/Accounts.kt` names them), so accounts never see each other's messages, wallet or keys. The first account uses the file names Zino had before accounts existed, so updating keeps everything.
+
+- **Switching.** `ZinoApp.switchTo` closes the current `Core` (its relays, subscriptions and network watch) and opens a new one on the other account's files. The activity draws the app inside `key(core)`, so every screen starts fresh for the new account.
+- **Adding** creates an empty account and switches to it, which shows sign-in. Sign-in can go back to the previous account, and the same person can't be added twice.
+- **Signing out** clears that account. If there are others, it's removed and another one takes over. Its files are deleted a little later, once the closed `Core` has let go of them.
+- **Notifications** are checked for the account in use.
 
 ## Relays
 
@@ -38,6 +47,7 @@ All code lives in `app/src/main/java/app/struthio/nostr/`, in four folders:
 - **Failing relays rest.** A relay that keeps failing, refuses us or rate-limits us is left alone for a while, so a dead relay doesn't slow everything down. A failure while the phone has no network doesn't count against any relay.
 - **Reconnects** ask only for what's newer than what the relay already sent.
 - **Data use and uptime** per relay are counted in `net/RelayStats.kt` and shown on the relay screens.
+- **Not now or no?** When a post fails, `PublishResult.retryable` says whether trying later could help: no relay answered, or the answers were "rate-limited:" or "error:" (NIP-01). An outright refusal like "blocked:" is shown as an error instead.
 
 `net/WebSocket.kt` is Zino's own WebSocket client (TLS, handshake, frames), so no networking library is needed. The only libraries Zino uses beyond Compose are libsecp256k1, for keys and signatures, and ZXing, for QR codes.
 
@@ -57,9 +67,10 @@ All code lives in `app/src/main/java/app/struthio/nostr/`, in four folders:
 - `zaps`: checked zap receipts
 - `dms`, `dm_reactions`: decrypted private messages and their reactions
 - `wraps`: which gift wraps were already opened
+- `outbox`: signed events waiting for a connection
 - `reads`: what you've already seen, for unread markers
 
-Deletions (NIP-09) remove the events they point at, but only when the author matches.
+Deletions (NIP-09) remove the events they point at, but only when the author matches. A deletion that arrives first also stops the deleted event from being stored later.
 
 Secrets, like your private key and wallet link, are not in the database. `data/Secure.kt` encrypts them with a key kept in Android's hardware Keystore.
 
@@ -85,6 +96,18 @@ The rules for reading a post are in `core/`:
 - `Markdown.kt` reads article text.
 
 The screens that draw posts are `ui/Note.kt` (every post card), `ui/Thread.kt` (a post and its replies), `ui/Article.kt`, `ui/Poll.kt`, `ui/Invoice.kt`, `ui/Embed.kt` and `ui/Viewer.kt`.
+
+## Sending without a connection
+
+When a post, reaction, vote or message can't reach any relay for now, `Core.publish` (or `deliver`, for messages) keeps the signed event in the `outbox` table and shows it in the app as if sent. A snackbar says it will go out later.
+
+`Core.sendWaiting` sends what's waiting:
+- when the network comes back,
+- when the account's session starts,
+- every two minutes while the app is open and something is waiting,
+- and during each background notification check.
+
+It stops at the first event that still can't go. Events that relays refuse outright are dropped, and so is anything still unsent after three days. The exact same signed event is sent each time, so a relay that got an earlier try keeps only one copy.
 
 ## Private messages
 
@@ -147,14 +170,14 @@ Message notifications never say who sent the message or what it says.
 | Wallet | `ui/Wallet.kt` |
 | Notifications | `ui/Alerts.kt` |
 | Relays and relay details | `ui/Relays.kt` |
-| Settings, profile editing, sign-in | `ui/Settings.kt` |
+| Settings, accounts, profile editing, sign-in | `ui/Settings.kt` |
 | QR scanning and codes | `ui/Qr.kt` |
 | Theme, fonts, colours | `ui/Theme.kt` |
 | Shared pieces (avatars, images, rows, times) | `ui/Common.kt`, `ui/Bars.kt` |
 
 ## Tests and checks
 
-- **Unit tests** are in `app/src/test/`. They cover the protocol code in `core/` (using the published NIP test vectors where they exist), and the relay pool, WebSocket client and relay stats in `net/`.
+- **Unit tests** are in `app/src/test/`. They cover the protocol code in `core/` (using the published NIP test vectors where they exist), and the relay pool, WebSocket client and relay stats in `net/`. Tests in `data/` run with Robolectric, which gives them Android's real SQLite on the computer. They cover the database (replaceable events, deletions, counts, messages, the outbox), accounts, opening gift wraps, and keeping posts made without a connection.
 - **Device checks** are in `scripts/`. They run by hand from GitHub Actions on an emulator and sign in read-only, so they never publish anything:
   - `smoke.sh` walks through the main screens.
   - `kinds-check.sh` checks how the different post kinds are drawn.

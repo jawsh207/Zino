@@ -86,6 +86,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -128,12 +129,20 @@ data class Profile(
 /** A problem worth showing the user as it is, like "Sign in first." */
 class UserError(message: String) : Exception(message)
 
-/** Everything behind the screens: account, cache, relays and the actions on them. */
-class Core(private val context: Context) {
+/**
+ * Everything behind the screens for one account: its signer, cache, relays and the actions on
+ * them. Switching accounts closes this Core and opens another on that account's own files.
+ */
+class Core(
+    private val context: Context,
+    val accountId: String = Accounts.FIRST,
+    private val accounts: Accounts? = null,
+    private val onSignedOut: (String) -> Unit = {},
+) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    val store = Store(context)
-    val secure = SecureStore(context)
-    val prefs = context.getSharedPreferences("app", Context.MODE_PRIVATE)
+    val store = Store(context, Accounts.databaseName(accountId))
+    val secure = SecureStore(context, Accounts.secretsName(accountId))
+    val prefs = context.getSharedPreferences(Accounts.settingsName(accountId), Context.MODE_PRIVATE)
     val imageDir = File(context.cacheDir, "images")
     private val relayInfoDir = File(context.cacheDir, "relays")
     private val relayStats = RelayStats(
@@ -168,6 +177,12 @@ class Core(private val context: Context) {
     val myRelays = MutableStateFlow(RelayList(DEFAULT_RELAYS, DEFAULT_RELAYS))
     val dmRelays = MutableStateFlow<List<String>>(emptyList())
 
+    /** How many signed events are waiting for a connection to be sent. */
+    val waiting = MutableStateFlow(0)
+
+    /** Short messages for whatever screen is open, like news that waiting posts were sent. */
+    val notices = MutableSharedFlow<String>(extraBufferCapacity = 4)
+
     /** Bumps when the cache changes, so that open screens can re-read it. */
     val changes = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
@@ -183,20 +198,25 @@ class Core(private val context: Context) {
     private val followsLock = Mutex()
     private val nip05Checked = HashSet<String>()
 
+    /** Hears about network changes from Android. */
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        /** A network came up: reconnect, then send anything that was waiting for it. */
+        override fun onAvailable(network: Network) {
+            pool.networkAvailable(network)
+            scope.launch {
+                delay(OUTBOX_SETTLE_MS)
+                sendWaiting()
+            }
+        }
+
+        /** A network went away. */
+        override fun onLost(network: Network) = pool.networkLost(network)
+    }
+
     init {
         // Tells the relays when the phone loses its network or swaps Wi-Fi for mobile data, so they
         // reconnect at once instead of each waiting out a timeout on a dead connection.
-        runCatching {
-            context.getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(
-                /** Hears about network changes from Android. */
-                object : ConnectivityManager.NetworkCallback() {
-                    /** A network came up. */
-                    override fun onAvailable(network: Network) = pool.networkAvailable(network)
-                    /** A network went away. */
-                    override fun onLost(network: Network) = pool.networkLost(network)
-                },
-            )
-        }
+        runCatching { context.getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(networkCallback) }
         // Chats once dropped reactions and what a message replied to. Opening the old messages once more
         // recovers both. Not with a remote signer: every message would be another round trip to it.
         if (!prefs.getBoolean("dm_reread_v5", false)) {
@@ -208,7 +228,15 @@ class Core(private val context: Context) {
         }
         scope.launch { ingestLoop() }
         scope.launch {
+            // Besides network changes, a slow retry while the app is open catches relays coming back.
+            while (true) {
+                delay(OUTBOX_RETRY_MS)
+                if (waiting.value > 0 && pool.isVisible) sendWaiting()
+            }
+        }
+        scope.launch {
             restoreAccount()
+            waiting.value = store.outgoingCount()
             ready.complete(Unit)
             store.prune(me, CACHE_EVENTS)
             Http.trimCache(imageDir, IMAGE_CACHE_BYTES)
@@ -235,6 +263,20 @@ class Core(private val context: Context) {
             batch.clear()
             delay(60)
         }
+    }
+
+    /**
+     * Stops this account's work: relays, subscriptions and the network watch. The database closes
+     * a little later, so work still finishing on it isn't cut off mid-write.
+     */
+    fun close() {
+        runCatching { context.getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(networkCallback) }
+        sessionSubs.forEach(pool::close)
+        sessionSubs.clear()
+        wallet.stop()
+        pool.shutdown()
+        scope.cancel()
+        main.postDelayed({ runCatching { store.close() } }, CLOSE_DELAY_MS)
     }
 
     /** Queues an event from a relay for storing. Any part of the app can call this. */
@@ -312,6 +354,7 @@ class Core(private val context: Context) {
      * unchanged, and checks the address afresh when it's new.
      */
     private fun publishProfile(profile: Profile) {
+        if (profile.pubkey == me) accounts?.update(accountId, profile.pubkey, profile.name, profile.picture)
         main.post {
             val old = profiles[profile.pubkey]
             profiles[profile.pubkey] = profile.copy(verified = old?.verified == true && old.nip05 == profile.nip05)
@@ -538,6 +581,7 @@ class Core(private val context: Context) {
      */
     private suspend fun activate(active: Signer) {
         val pubkey = active.pubkey
+        accounts?.update(accountId, pubkey)
         sessionLoaded.value = false
         // Cached lists first: screens look at these as soon as a signer exists.
         loadCachedLists(pubkey)
@@ -560,6 +604,13 @@ class Core(private val context: Context) {
     private suspend fun applyCachedMutes(pubkey: String) {
         store.latest(pubkey, Kind.MUTES)?.let { applyMutes(it) }
         store.latest(pubkey, Kind.BOOKMARKS)?.let { applyBookmarks(it) }
+    }
+
+    /** Refuses to sign in as someone who already has their own account on this phone. */
+    private fun checkNotAdded(pubkey: String) {
+        if (accounts?.holding(pubkey, accountId) != null) {
+            throw UserError("That account is already on this phone. Switch to it in Settings.")
+        }
     }
 
     /** A new account gets a key, a profile and the relay lists others need to reach it. */
@@ -607,6 +658,7 @@ class Core(private val context: Context) {
         val text = input.trim()
         val entity = Nip19.decode(text)
         if (entity is Entity.Profile) {
+            checkNotAdded(entity.pubkey)
             prefs.edit().putString("read_only_pubkey", entity.pubkey).apply()
             activate(ReadOnlySigner(entity.pubkey))
             return
@@ -622,6 +674,7 @@ class Core(private val context: Context) {
     /** Stores a private key safely and signs in with it. */
     private suspend fun adoptSecret(secret: ByteArray) {
         if (!Keys.isValidSecret(secret)) throw UserError("That key is not valid.")
+        checkNotAdded(Keys.publicKey(secret))
         secure.put(KEY_SECRET, secret)
         prefs.edit().remove("read_only_pubkey").apply()
         activate(LocalSigner(secret))
@@ -629,6 +682,7 @@ class Core(private val context: Context) {
 
     /** Signs in through a signer app (NIP-55). */
     suspend fun signInExternal(pubkey: String, packageName: String) {
+        checkNotAdded(pubkey)
         prefs.edit().putString("signer_package", packageName).putString("signer_pubkey", pubkey).remove("read_only_pubkey").apply()
         activate(ExternalSigner(context, pubkey, packageName))
     }
@@ -687,6 +741,7 @@ class Core(private val context: Context) {
         // The signer's own key isn't necessarily the account's: the NIP says to ask.
         val user = session.request("get_public_key", emptyList()).trim().lowercase()
         if (!Hex.isKey(user)) throw UserError("The remote signer didn't say which account it signs for.")
+        checkNotAdded(user)
         val moved = session.switchRelays() ?: relays
         secure.put(KEY_BUNKER, clientKey)
         prefs.edit()
@@ -725,7 +780,10 @@ class Core(private val context: Context) {
         taken
     }
 
-    /** Signs out and clears everything stored for the account. */
+    /**
+     * Signs out and clears everything stored for the account. With other accounts on the phone,
+     * this one is then removed and another takes its place.
+     */
     suspend fun signOut() {
         // A courtesy to the remote signer; its client key goes either way, as the NIP requires.
         (signer.value as? RemoteSigner)?.let { runCatching { it.logout() } }
@@ -749,6 +807,7 @@ class Core(private val context: Context) {
         withContext(Dispatchers.Main) {
             profiles.clear()
             stats.clear()
+            onSignedOut(accountId)
         }
     }
 
@@ -768,6 +827,7 @@ class Core(private val context: Context) {
                 delay(300)
             }
             sessionLoaded.value = true
+            if (waiting.value > 0) launch { sendWaiting() }
             refreshTrustedNetwork()
             // Our own zap provider, so that received zaps can be validated (NIP-57 Appendix F).
             store.latest(pubkey, Kind.METADATA)?.let(::parseProfile)?.let { profile ->
@@ -822,22 +882,70 @@ class Core(private val context: Context) {
         val earlier = unconfirmed[key]?.takeIf { nowSeconds() - it.createdAt < RETRY_SAME_EVENT_S }
         val event = earlier ?: active.sign(draft)
         val own = (writeRelays() + extraRelays).take(MAX_PUBLISH_RELAYS).toSet()
-        withContext(NonCancellable) {
+        val queued = withContext(NonCancellable) {
             val result = pool.publishFirst(event, own)
             AppLog.add(
                 "sent kind ${event.kind} to ${own.size} relays" + (if (earlier != null) " (again, same event)" else "") + ": " +
                     if (result.ok) "accepted" else "failed ${result.message}",
             )
+            if (!result.ok && result.retryable) {
+                unconfirmed.remove(key)
+                keepForLater(event, own, show = true)
+                return@withContext true
+            }
             if (!result.ok) {
                 unconfirmed[key] = event
                 throw UserError(result.message.takeIf { it.isNotBlank() } ?: "No relay accepted this.")
             }
             unconfirmed.remove(key)
             ingest(event, own.first())
+            false
         }
         val tagged = draft.tags.values("p").distinct().filter(Hex::isKey).take(20)
-        if (tagged.isNotEmpty()) scope.launch { runCatching { reachTagged(event, tagged, own) } }
+        if (!queued && tagged.isNotEmpty()) scope.launch { runCatching { reachTagged(event, tagged, own) } }
         return event
+    }
+
+    /**
+     * Keeps an event that no relay could take right now, to send once they can. With [show] it
+     * also appears in the app at once, as if sent.
+     */
+    private fun keepForLater(event: Event, relays: Set<String>, show: Boolean) {
+        store.queueOutgoing(event, relays, nowSeconds())
+        if (show) ingest(event, relays.first())
+        waiting.value = store.outgoingCount()
+        AppLog.add("kept kind ${event.kind} to send later")
+        notices.tryEmit(WAITING_NOTICE)
+    }
+
+    private val sendingWaiting = Mutex()
+
+    /**
+     * Tries again to send everything waiting, through [via]. Stops at the first event that still
+     * can't go, as the connection is likely still down. Events relays refuse outright are dropped,
+     * and so is anything still unsent after a few days.
+     */
+    suspend fun sendWaiting(via: RelayPool = pool) {
+        if (!sendingWaiting.tryLock()) return
+        try {
+            val stale = store.dropOutgoingBefore(nowSeconds() - OUTBOX_KEEP_S)
+            if (stale > 0) AppLog.add("gave up on $stale events that could not be sent")
+            var sent = 0
+            for ((event, relays) in store.outgoing()) {
+                val result = via.publishFirst(event, relays)
+                if (!result.ok && result.retryable) break
+                store.removeOutgoing(event.id)
+                if (result.ok) sent++ else AppLog.add("dropped waiting kind ${event.kind}: ${result.message}")
+            }
+            val left = store.outgoingCount()
+            waiting.value = left
+            if (sent > 0) {
+                AppLog.add("sent $sent waiting events")
+                if (left == 0) notices.tryEmit(SENT_NOTICE)
+            }
+        } finally {
+            sendingWaiting.unlock()
+        }
     }
 
     /** Signed events no relay confirmed, by what they say, so a retry reuses them. */
@@ -1246,7 +1354,7 @@ class Core(private val context: Context) {
     // Private messages (NIP-17, NIP-59)
 
     /** Stores the message inside a gift wrap and returns its sender, when it can be opened. */
-    private suspend fun receiveWrap(wrap: Event): String? {
+    internal suspend fun receiveWrap(wrap: Event): String? {
         if (store.hasWrap(wrap.id)) return null
         val active = signer.value ?: return null
         try {
@@ -1292,7 +1400,7 @@ class Core(private val context: Context) {
      * Seals a message and gift-wraps it for one recipient (NIP-59): only they can open it, and the
      * outside shows neither sender nor time.
      */
-    private suspend fun wrapFor(rumorJson: String, recipient: String, active: Signer): Event {
+    internal suspend fun wrapFor(rumorJson: String, recipient: String, active: Signer): Event {
         val sealContent = active.nip44Encrypt(rumorJson, recipient)
         val seal = active.sign(Draft(active.pubkey, pastTime(), Kind.SEAL, emptyList(), sealContent))
         val ephemeral = Keys.generate()
@@ -1328,20 +1436,34 @@ class Core(private val context: Context) {
         val rumor = Draft(active.pubkey, nowSeconds(), kind, others.map { listOf("p", it) } + extraTags, content)
         val json = rumor.toJson()
         var delivered = false
+        var kept = false
         for ((recipient, relays) in targets) {
-            val result = pool.publishFirst(wrapFor(json, recipient, active), relays.toSet())
+            val wrap = wrapFor(json, recipient, active)
+            val result = pool.publishFirst(wrap, relays.toSet())
             AppLog.add("message to ${relays.joinToString(" ")}: " + if (result.ok) "accepted" else "failed ${result.message}")
             delivered = result.ok || delivered
+            // No connection: the sealed copy waits and goes out later, exactly as it is.
+            if (!result.ok && result.retryable) {
+                keepForLater(wrap, relays.toSet(), show = false)
+                kept = true
+            }
         }
-        if (others.isNotEmpty() && !delivered) throw UserError("The message could not be delivered.")
+        if (others.isNotEmpty() && !delivered && !kept) throw UserError("The message could not be delivered.")
         val ownCopy = wrapFor(json, active.pubkey, active)
         if (others.isEmpty()) {
             // A note to yourself has no one else to reach, so your own inbox has to take it.
             val result = pool.publishFirst(ownCopy, mine.toSet())
             AppLog.add("note to self to ${mine.joinToString(" ")}: " + if (result.ok) "accepted" else "failed ${result.message}")
-            if (!result.ok) throw UserError(result.message.takeIf { it.isNotBlank() } ?: "The message could not be delivered.")
+            if (!result.ok && result.retryable) {
+                keepForLater(ownCopy, mine.toSet(), show = false)
+            } else if (!result.ok) {
+                throw UserError(result.message.takeIf { it.isNotBlank() } ?: "The message could not be delivered.")
+            }
         } else {
-            scope.launch { pool.publish(ownCopy, mine.toSet()) }
+            scope.launch {
+                val result = pool.publishFirst(ownCopy, mine.toSet())
+                if (!result.ok && result.retryable) keepForLater(ownCopy, mine.toSet(), show = false)
+            }
         }
         return rumor
     }
@@ -1737,6 +1859,8 @@ class Core(private val context: Context) {
             AppLog.add("background check: ${alerts.size} alerts, $messages messages, ${answered.size} relays answered")
             Notifier.post(context, alerts, messages) { names[it] ?: shortNpub(it) }
             if (answered.isNotEmpty()) prefs.edit().putLong("notify_since", now).apply()
+            // Whatever couldn't be sent earlier gets another chance while connected anyway.
+            if (waiting.value > 0) sendWaiting(checker)
         } finally {
             checker.shutdown()
         }
@@ -1894,6 +2018,10 @@ class Core(private val context: Context) {
         withContext(NonCancellable) {
             val result = pool.publishFirst(signed, relays)
             AppLog.add("vote to ${relays.size} relays: " + if (result.ok) "accepted" else "failed ${result.message}")
+            if (!result.ok && result.retryable) {
+                keepForLater(signed, relays, show = true)
+                return@withContext
+            }
             if (!result.ok) throw UserError(result.message.takeIf { it.isNotBlank() } ?: "No relay accepted this vote.")
             ingest(signed, relays.first())
         }
@@ -1982,6 +2110,14 @@ class Core(private val context: Context) {
         /** The throwaway key Zino uses to talk to a NIP-46 remote signer. */
         const val KEY_BUNKER = "nip46_client"
         const val KEY_NWC = "nwc"
+        /** How long unsent events are kept trying before giving up. */
+        private const val OUTBOX_KEEP_S = 3 * 86400L
+        private const val OUTBOX_RETRY_MS = 120_000L
+        /** A new network gets a moment to settle before waiting events go out on it. */
+        private const val OUTBOX_SETTLE_MS = 3_000L
+        private const val CLOSE_DELAY_MS = 10_000L
+        const val WAITING_NOTICE = "No connection. It will be sent when you're back online."
+        const val SENT_NOTICE = "Sent everything that was waiting"
         private const val CACHE_EVENTS = 20_000
         private const val IMAGE_CACHE_BYTES = 80L * 1024 * 1024
         private const val RELAY_INFO_MS = 86_400_000L

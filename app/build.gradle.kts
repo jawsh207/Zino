@@ -71,7 +71,15 @@ android {
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.isIncludeAndroidResources = true
     }
+}
+
+// The native crypto library can be loaded only once per JVM, and the Robolectric tests load it in a
+// class loader of their own, so each test class gets its own JVM.
+tasks.withType<Test>().configureEach {
+    forkEvery = 1
+    maxHeapSize = "2g"
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
@@ -98,4 +106,6 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.json)
     testImplementation(libs.secp256k1.jvm)
+    // Runs the database and Core tests on the computer, with Android's real SQLite.
+    testImplementation(libs.robolectric)
 }

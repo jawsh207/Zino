@@ -12,6 +12,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import app.struthio.nostr.data.SignerBridge
 import app.struthio.nostr.data.SignerResult
 import app.struthio.nostr.ui.App
@@ -21,7 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 /** The app's only activity. */
 class MainActivity : ComponentActivity() {
-    private val core get() = (application as ZinoApp).core
+    private val app get() = application as ZinoApp
     private val deepLink = MutableStateFlow<String?>(null)
     private var signerReply: CompletableDeferred<SignerResult>? = null
 
@@ -55,7 +58,9 @@ class MainActivity : ComponentActivity() {
         deepLink.value = intent?.dataString
         setContent {
             ZinoTheme {
-                App(core, deepLink)
+                val core by app.current.collectAsState()
+                // A switch to another account starts the screens afresh, with nothing carried over.
+                core?.let { key(it) { App(it, deepLink) } }
             }
         }
     }
@@ -79,12 +84,12 @@ class MainActivity : ComponentActivity() {
     /** The app came to the front: relays may connect. */
     override fun onStart() {
         super.onStart()
-        core.pool.activityStarted()
+        app.appStarted()
     }
 
     /** The app went away: relays disconnect once idle. */
     override fun onStop() {
         super.onStop()
-        core.pool.activityStopped()
+        app.appStopped()
     }
 }

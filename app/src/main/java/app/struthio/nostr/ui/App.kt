@@ -180,6 +180,9 @@ fun App(core: Core, deepLink: MutableStateFlow<String?>) {
         }
     }
 
+    // News from behind the screens, like posts kept until there's a connection, or sent at last.
+    LaunchedEffect(core) { core.notices.collect { nav.say(it) } }
+
     CompositionLocalProvider(LocalCore provides core, LocalNav provides nav) {
         if (signer == null) {
             Scaffold(contentWindowInsets = WindowInsets(0), snackbarHost = { SnackbarHost(snackbar) }) { padding ->

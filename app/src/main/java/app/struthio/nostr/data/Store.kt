@@ -95,11 +95,16 @@ data class Alert(val event: Event, val actor: String, val msats: Long, val comme
 
 /** Local cache on the platform's SQLite: the first thing every screen shows. */
 private const val CREATE_READS = "CREATE TABLE reads(key TEXT PRIMARY KEY, at INTEGER NOT NULL)"
+private const val CREATE_OUTBOX =
+    "CREATE TABLE outbox(id TEXT PRIMARY KEY, json TEXT NOT NULL, relays TEXT NOT NULL, added_at INTEGER NOT NULL)"
 private const val CREATE_DM_REACTIONS =
     "CREATE TABLE dm_reactions(id TEXT PRIMARY KEY, room TEXT NOT NULL, target TEXT NOT NULL, sender TEXT NOT NULL, content TEXT NOT NULL, created_at INTEGER NOT NULL)"
 
-/** The database itself. Version 5 added replies and reactions in private messages. */
-class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5) {
+/**
+ * The database itself, one file per account. Version 5 added replies and reactions in private
+ * messages; version 6 the outbox of events waiting to be sent.
+ */
+class Store(context: Context, name: String = "struthio.db") : SQLiteOpenHelper(context, name, null, 6) {
 
     /** Lets reading and writing happen at the same time. */
     override fun onConfigure(db: SQLiteDatabase) {
@@ -140,6 +145,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         db.execSQL("CREATE TABLE follows(pubkey TEXT PRIMARY KEY)")
         db.execSQL("CREATE TABLE trusted(pubkey TEXT PRIMARY KEY)")
         db.execSQL(CREATE_READS)
+        db.execSQL(CREATE_OUTBOX)
     }
 
     /** Brings an older database up to date, one version at a time. */
@@ -152,6 +158,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
             db.execSQL(CREATE_DM_REACTIONS)
             db.execSQL("CREATE INDEX dm_reactions_room ON dm_reactions(room)")
         }
+        if (oldVersion < 6) db.execSQL(CREATE_OUTBOX)
     }
 
     /** Stores a batch and returns what is new. */
@@ -174,6 +181,8 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
      */
     private fun insertOne(db: SQLiteDatabase, e: Event, relay: String): Boolean {
         if (Kind.isEphemeral(e.kind) || e.kind == Kind.GIFT_WRAP) return false
+        // A deletion can arrive before what it deletes; the event must not come back afterwards.
+        if (e.kind != Kind.DELETION && isDeleted(db, e)) return false
         if (Kind.isReplaceable(e.kind) || Kind.isAddressable(e.kind)) {
             val d = if (Kind.isAddressable(e.kind)) e.tags.value("d") ?: "" else null
             val args = if (d == null) arrayOf(e.pubkey, e.kind.toString()) else arrayOf(e.pubkey, e.kind.toString(), d)
@@ -222,9 +231,18 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
             db.execSQL("INSERT INTO notes_fts(docid, content) VALUES(?,?)", arrayOf(rowid, e.content))
         }
         if (e.kind == Kind.ZAP_RECEIPT) parseZapReceipt(e)?.let { insertZap(db, it) }
-        if (e.kind == Kind.DELETION) applyDeletion(db, e)
+        if (e.kind == Kind.DELETION) {
+            e.tags.values("e").distinct().forEach { addRef("del", it) }
+            applyDeletion(db, e)
+        }
         return true
     }
+
+    /** True if the event's own author has already asked for it to be deleted (NIP-09). */
+    private fun isDeleted(db: SQLiteDatabase, e: Event): Boolean = db.rawQuery(
+        "SELECT 1 FROM refs r JOIN events d ON d.id=r.id WHERE r.name='del' AND r.value=? AND d.pubkey=? AND d.kind=5 LIMIT 1",
+        arrayOf(e.id, e.pubkey),
+    ).use { it.moveToFirst() }
 
     /** Stores a checked zap receipt. */
     private fun insertZap(db: SQLiteDatabase, zap: Zap) {
@@ -636,6 +654,41 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
         )
     }
 
+    /** Keeps a signed event that no relay has taken yet, with the relays it's meant for. */
+    fun queueOutgoing(event: Event, relays: Set<String>, now: Long) {
+        val values = ContentValues(4).apply {
+            put("id", event.id)
+            put("json", event.toJson())
+            put("relays", relays.joinToString(" "))
+            put("added_at", now)
+        }
+        writableDatabase.insertWithOnConflict("outbox", null, values, SQLiteDatabase.CONFLICT_IGNORE)
+    }
+
+    /** Events waiting to be sent, oldest first, each with its relays. */
+    fun outgoing(): List<Pair<Event, Set<String>>> {
+        val out = ArrayList<Pair<Event, Set<String>>>()
+        readableDatabase.rawQuery("SELECT json, relays FROM outbox ORDER BY added_at", null).use {
+            while (it.moveToNext()) {
+                val event = Event.parse(it.getString(0)) ?: continue
+                out += event to it.getString(1).split(' ').filter(String::isNotBlank).toSet()
+            }
+        }
+        return out
+    }
+
+    /** How many events are waiting to be sent. */
+    fun outgoingCount(): Int =
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM outbox", null).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+
+    /** Takes an event out of the outbox, once sent. */
+    fun removeOutgoing(id: String) {
+        writableDatabase.delete("outbox", "id=?", arrayOf(id))
+    }
+
+    /** Gives up on events waiting since before [time]; returns how many were dropped. */
+    fun dropOutgoingBefore(time: Long): Int = writableDatabase.delete("outbox", "added_at < ?", arrayOf(time.toString()))
+
     /** Keeps the cache bounded: only ordinary events by people not followed are dropped. */
     fun prune(me: String?, keep: Int) {
         val db = writableDatabase
@@ -661,7 +714,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "struthio.db", null, 5
     fun clearAll() {
         writableDatabase.execSQL("DELETE FROM reads")
         val db = writableDatabase
-        for (table in listOf("refs", "zaps", "providers", "dms", "dm_reactions", "wraps", "follows", "trusted", "events")) db.delete(table, null, null)
+        for (table in listOf("refs", "zaps", "providers", "dms", "dm_reactions", "wraps", "follows", "trusted", "outbox", "events")) db.delete(table, null, null)
         db.execSQL("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')")
     }
 

@@ -24,9 +24,12 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Secrets at rest: AES-GCM under a hardware-backed Android Keystore key. */
-class SecureStore(context: Context) {
-    private val prefs = context.getSharedPreferences("secure", Context.MODE_PRIVATE)
+/**
+ * Secrets at rest: AES-GCM under a hardware-backed Android Keystore key. Each account keeps its
+ * secrets in a file of its own, all sealed by the same Keystore key.
+ */
+class SecureStore(context: Context, name: String = "secure") {
+    private val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
 
     /** The Keystore key that protects stored secrets, created the first time. */
     private fun key(): SecretKey {

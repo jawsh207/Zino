@@ -164,6 +164,9 @@ class Wallet(private val core: Core) {
         }
     }
 
+    /** Stops listening, as when the account is closed; the connection stays saved. */
+    fun stop() = stopListening()
+
     /** Stops listening for the wallet's answers. */
     private fun stopListening() {
         listener?.let(core.pool::close)
