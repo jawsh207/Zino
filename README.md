@@ -17,6 +17,7 @@ The name comes from *struzzino*, Italian for a baby ostrich, cut down to its las
 - A follows-of-follows filter for Global and Trending
 - Several accounts on one phone, each kept separate, switched from Settings
 - Posts, reactions and messages made without a connection are kept and sent once it's back
+- Ready for translation: all text is in `strings.xml`, and Android's per-app language setting works
 
 ## Protocol
 

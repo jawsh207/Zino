@@ -4,6 +4,9 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.plural
+import app.struthio.nostr.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -71,10 +74,10 @@ import app.struthio.nostr.data.FeedSource
 import kotlinx.coroutines.flow.Flow
 
 private val SOURCES = listOf(
-    "Following" to FeedSource.Following,
-    "Trending" to FeedSource.Trending,
-    "Global" to FeedSource.Global,
-    "Relays" to FeedSource.MyRelays,
+    str(R.string.following) to FeedSource.Following,
+    str(R.string.trending) to FeedSource.Trending,
+    str(R.string.global) to FeedSource.Global,
+    str(R.string.relays) to FeedSource.MyRelays,
 )
 
 /** The Home tab, with its feed tabs and a button to write a post. */
@@ -110,14 +113,14 @@ fun HomeScreen() {
                     selected = it
                 }
             }
-            NoteList(feed, Modifier.weight(1f), scrollToTop = LocalNav.current.homeTapped, empty = if (selected == 0) "Follow people to fill this feed. Trending and Global work right away." else "Nothing here yet.")
+            NoteList(feed, Modifier.weight(1f), scrollToTop = LocalNav.current.homeTapped, empty = if (selected == 0) str(R.string.follow_people_to_fill_this_feed) else str(R.string.nothing_here_yet))
         }
         FloatingActionButton(
             onClick = { nav.push(Screen.Compose()) },
             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
             containerColor = MaterialTheme.colorScheme.primaryContainer,
         ) {
-            Icon(Icons.Outlined.Edit, "New note")
+            Icon(Icons.Outlined.Edit, str(R.string.new_note))
         }
     }
 }
@@ -135,7 +138,7 @@ private fun SearchPill(onSearch: () -> Unit, onSettings: () -> Unit) {
             Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(12.dp))
             Text(
-                "Search notes, people, #tags",
+                str(R.string.search_notes_people_tags),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -143,7 +146,7 @@ private fun SearchPill(onSearch: () -> Unit, onSettings: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             IconButton(onClick = onSettings) {
-                Icon(Icons.Rounded.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Rounded.Settings, str(R.string.settings), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -180,7 +183,7 @@ fun NoteList(
     feed: Feed,
     modifier: Modifier = Modifier,
     scrollToTop: Flow<Unit>? = null,
-    empty: String = "Nothing here yet.",
+    empty: String = str(R.string.nothing_here_yet),
     /** Shows only some of the feed, as a profile's tabs do. */
     filter: ((Event) -> Boolean)? = null,
     /** Pictures and videos in a grid rather than notes in a list. */
@@ -283,7 +286,7 @@ fun NoteList(
             ) {
                 Icon(Icons.Rounded.ArrowUpward, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text(if (shown == 1) "1 new post" else "${if (shown > 99) "99+" else shown} new posts")
+                Text(plural(R.plurals.new_posts, shown, if (shown > 99) "99+" else shown.toString()))
             }
         }
     }

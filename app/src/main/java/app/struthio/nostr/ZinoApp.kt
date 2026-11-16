@@ -32,6 +32,7 @@ class ZinoApp : Application() {
     /** Starts the log as the app starts. */
     override fun onCreate() {
         super.onCreate()
+        Texts.use(this)
         AppLog.start(File(filesDir, "log.txt"))
     }
 

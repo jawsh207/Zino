@@ -4,6 +4,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -43,10 +45,10 @@ fun AlertsScreen() {
     val unread by liveQuery(emptySet<String>(), me) { core.unreadAlerts(me) }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        UnreadHeader("Notifications", unread.isNotEmpty()) { core.readAllAlerts(me) }
+        UnreadHeader(str(R.string.notifications), unread.isNotEmpty()) { core.readAllAlerts(me) }
         if (alerts.isEmpty()) {
             Text(
-                "Replies, boosts, reactions and zaps show up here.",
+                str(R.string.replies_boosts_reactions_and_zaps_show),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = PageGutter),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

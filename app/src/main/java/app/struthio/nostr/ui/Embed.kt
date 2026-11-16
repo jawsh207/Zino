@@ -5,6 +5,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.pm.ActivityInfo
@@ -105,7 +107,7 @@ fun EmbedCard(url: String, embed: VideoEmbed) {
                     Box(
                         Modifier.size(56.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.6f)),
                         contentAlignment = Alignment.Center,
-                    ) { Icon(Icons.Rounded.PlayArrow, "Play on ${embed.site}", tint = Color.White, modifier = Modifier.size(36.dp)) }
+                    ) { Icon(Icons.Rounded.PlayArrow, str(R.string.play_on_x, embed.site), tint = Color.White, modifier = Modifier.size(36.dp)) }
                 }
             }
         }
@@ -116,7 +118,7 @@ fun EmbedCard(url: String, embed: VideoEmbed) {
                 }
                 Text(embed.site, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
-            IconButton(open) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, "Open in browser") }
+            IconButton(open) { Icon(Icons.AutoMirrored.Rounded.OpenInNew, str(R.string.open_in_browser)) }
         }
     }
 }

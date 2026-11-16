@@ -4,6 +4,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -83,7 +85,7 @@ private fun ReplyLine(author: String?, onClick: () -> Unit) {
     val core = LocalCore.current
     LaunchedEffect(author) { author?.let(core::wantProfile) }
     Text(
-        "Replying to " + (author?.let(core::displayName) ?: "a note"),
+        str(R.string.replying_to_x, author?.let(core::displayName) ?: str(R.string.a_note)),
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.primary,
         maxLines = 1,
@@ -100,7 +102,7 @@ private fun ReplyTarget(note: Event, onClear: (() -> Unit)?) {
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(
-                "Replying to " + core.displayName(note.pubkey),
+                str(R.string.replying_to_x, core.displayName(note.pubkey)),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
                 maxLines = 1,
@@ -114,7 +116,7 @@ private fun ReplyTarget(note: Event, onClear: (() -> Unit)?) {
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        if (onClear != null) IconButton(onClear) { Icon(Icons.Rounded.Close, "Reply to the opened note instead") }
+        if (onClear != null) IconButton(onClear) { Icon(Icons.Rounded.Close, str(R.string.reply_to_the_opened_note_instead)) }
     }
 }
 
@@ -158,7 +160,7 @@ fun ThreadScreen(screen: Screen.Thread) {
     }
 
     Column(Modifier.fillMaxSize().imePadding()) {
-        BackBar(if (focus?.kind == Kind.ARTICLE) "Article" else "Thread")
+        BackBar(if (focus?.kind == Kind.ARTICLE) str(R.string.article) else str(R.string.thread))
         if (focus == null) {
             Loading(Modifier.fillMaxWidth().weight(1f))
         } else {
@@ -210,7 +212,7 @@ fun ThreadScreen(screen: Screen.Thread) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     AttachImageButton { attached += it }
-                    NoteField(draft, "Add a comment", Modifier.weight(1f).focusRequester(field), maxLines = 4)
+                    NoteField(draft, str(R.string.add_a_comment), Modifier.weight(1f).focusRequester(field), maxLines = 4)
                     FilledIconButton(
                         onClick = {
                             val parent = target ?: return@FilledIconButton
@@ -228,7 +230,7 @@ fun ThreadScreen(screen: Screen.Thread) {
                         },
                         enabled = (draft.value.text.isNotBlank() || attached.isNotEmpty()) && !sending,
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.Send, "Send")
+                        Icon(Icons.AutoMirrored.Rounded.Send, str(R.string.send))
                     }
                 }
               }
@@ -275,7 +277,7 @@ fun ComposeScreen(quoteId: String?) {
         if (quoteId != null) value = core.fetchEvent(quoteId)
     }
     Column(Modifier.fillMaxSize().imePadding()) {
-        BackBar(if (quoteId == null) "New note" else "Quote note") {
+        BackBar(if (quoteId == null) str(R.string.new_note) else str(R.string.quote_note)) {
             if (poll == null) AttachImageButton { attached += it }
             if (quoteId == null) {
                 IconButton(
@@ -285,16 +287,16 @@ fun ComposeScreen(quoteId: String?) {
                     },
                     colors = if (poll != null) IconButtonDefaults.filledTonalIconButtonColors() else IconButtonDefaults.iconButtonColors(),
                 ) {
-                    Icon(Icons.Rounded.Poll, if (poll != null) "Remove poll" else "Add a poll")
+                    Icon(Icons.Rounded.Poll, if (poll != null) str(R.string.remove_poll) else str(R.string.add_a_poll))
                 }
                 IconButton(
                     {
                         sensitive = !sensitive
-                        nav.say(if (sensitive) "Marked as sensitive content" else "No longer marked as sensitive")
+                        nav.say(if (sensitive) str(R.string.marked_as_sensitive_content) else str(R.string.no_longer_marked_as_sensitive))
                     },
                     colors = if (sensitive) IconButtonDefaults.filledTonalIconButtonColors() else IconButtonDefaults.iconButtonColors(),
                 ) {
-                    Icon(Icons.Rounded.VisibilityOff, if (sensitive) "Sensitive content, on" else "Sensitive content, off")
+                    Icon(Icons.Rounded.VisibilityOff, if (sensitive) str(R.string.sensitive_content_on) else str(R.string.sensitive_content_off))
                 }
             }
             androidx.compose.material3.Button(
@@ -321,9 +323,9 @@ fun ComposeScreen(quoteId: String?) {
                 enabled = !sending && (quoteId == null || quoted != null) &&
                     (poll?.let { text.isNotBlank() && it.filled.size >= 2 } ?: (text.isNotBlank() || attached.isNotEmpty())),
                 modifier = Modifier.padding(end = 8.dp),
-            ) { Text(if (sending) "Posting…" else "Post") }
+            ) { Text(if (sending) str(R.string.posting_2) else str(R.string.post)) }
         }
-        NoteField(draft, if (poll != null) "Ask a question" else "What's on your mind?", Modifier.fillMaxWidth().weight(1f).padding(PageGutter))
+        NoteField(draft, if (poll != null) str(R.string.ask_a_question) else str(R.string.what_s_on_your_mind), Modifier.fillMaxWidth().weight(1f).padding(PageGutter))
         poll?.let { PollEditor(it) }
         AttachedImages(attached) { attached.remove(it) }
         quoted?.let {

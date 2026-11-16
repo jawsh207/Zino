@@ -5,6 +5,8 @@
  */
 package app.struthio.nostr.data
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import app.struthio.nostr.core.Draft
 import app.struthio.nostr.core.Event
 import app.struthio.nostr.core.Filter
@@ -92,17 +94,17 @@ class Wallet(private val core: Core) {
      * asked.
      */
     suspend fun connect(text: String, save: Boolean = true) {
-        val uri = NwcUri.parse(text) ?: throw UserError("That is not a wallet connection link.")
+        val uri = NwcUri.parse(text) ?: throw UserError(str(R.string.that_is_not_a_wallet_connection))
         val relays = uri.relays.mapNotNull(::normalizeRelay).toSet()
-        if (relays.isEmpty()) throw UserError("That connection has no usable relay.")
+        if (relays.isEmpty()) throw UserError(str(R.string.that_connection_has_no_usable_relay))
         var info: Event? = null
         core.pool.query(relays, listOf(Filter(authors = listOf(uri.wallet), kinds = listOf(Kind.NWC_INFO), limit = 1))) { e, _ ->
             if (info == null || e.createdAt > info!!.createdAt) info = e
         }
-        val found = info ?: throw UserError("The wallet service did not answer.")
+        val found = info ?: throw UserError(str(R.string.the_wallet_service_did_not_answer))
         val encryption = found.tags.first("encryption")?.getOrNull(1).orEmpty().split(' ')
         if ("nip44_v2" !in encryption) {
-            throw UserError("This wallet only offers outdated encryption. Update it, or use another wallet.")
+            throw UserError(str(R.string.this_wallet_only_offers_outdated_encryption))
         }
         val methods = found.content.split(' ').filter { it.isNotEmpty() }.toSet()
         stopListening()
@@ -176,7 +178,7 @@ class Wallet(private val core: Core) {
 
     /** Sends one request to the wallet and waits for its answer. */
     private suspend fun call(method: String, params: JSONObject = JSONObject(), timeoutMs: Long = 30_000): JSONObject {
-        val c = connection ?: throw UserError("Connect a wallet first.")
+        val c = connection ?: throw UserError(str(R.string.connect_a_wallet_first))
         listen(c)
         // A just-opened listener gets a moment to reach the relay, unless a relay already confirmed it.
         val settle = LISTEN_MS - (System.currentTimeMillis() - listeningSince)
@@ -206,7 +208,7 @@ class Wallet(private val core: Core) {
                 if (!sent.ok) {
                     // A lookup that couldn't go out, as when the phone is between Wi-Fi and mobile data,
                     // waits for a network and goes again. A payment never goes twice on its own.
-                    if (method !in REPEATABLE) throw UserError("The wallet relay did not take the request.")
+                    if (method !in REPEATABLE) throw UserError(str(R.string.the_wallet_relay_did_not_take))
                     if (!core.pool.online.value) withTimeoutOrNull(left) { core.pool.online.first { it } }
                     if (System.currentTimeMillis() - started >= timeoutMs) break
                     delay(3_000)
@@ -218,7 +220,7 @@ class Wallet(private val core: Core) {
             }
             val elapsed = (System.currentTimeMillis() - started) / 1000
             AppLog.add("wallet $method: " + if (response == null) "no answer in ${elapsed}s" else "answered after ${elapsed}s")
-            if (response == null) throw UserError("The wallet did not respond.")
+            if (response == null) throw UserError(str(R.string.the_wallet_did_not_respond))
             response.optJSONObject("error")?.let { throw UserError(it.optString("message").ifEmpty { it.optString("code") }) }
             return response.optJSONObject("result") ?: JSONObject()
         } finally {
@@ -236,7 +238,7 @@ class Wallet(private val core: Core) {
             throw e
         } catch (e: Exception) {
             AppLog.add("wallet refresh failed: ${e.message ?: e.javaClass.simpleName}")
-            problem.value = (e as? UserError)?.message ?: "Something went wrong"
+            problem.value = (e as? UserError)?.message ?: str(R.string.something_went_wrong_2)
         }
     }
 
@@ -270,7 +272,7 @@ class Wallet(private val core: Core) {
     suspend fun makeInvoice(sats: Long, description: String): String {
         val params = JSONObject().put("amount", sats * 1000)
         if (description.isNotBlank()) params.put("description", description)
-        return call("make_invoice", params).optString("invoice").ifEmpty { throw UserError("The wallet returned no invoice.") }
+        return call("make_invoice", params).optString("invoice").ifEmpty { throw UserError(str(R.string.the_wallet_returned_no_invoice)) }
     }
 
     /** Pays a BOLT-11 invoice or a lightning address. */
@@ -278,13 +280,13 @@ class Wallet(private val core: Core) {
         val text = target.trim().removePrefix("lightning:")
         if (text.contains('@')) {
             val at = text.lastIndexOf('@')
-            val amount = sats ?: throw UserError("Enter an amount.")
+            val amount = sats ?: throw UserError(str(R.string.enter_an_amount))
             val o = Http.json("https://${text.substring(at + 1)}/.well-known/lnurlp/${text.substring(0, at)}")
             val msats = amount * 1000
             val callback = o.getString("callback")
             val separator = if (callback.contains('?')) '&' else '?'
             val invoice = Http.json("$callback${separator}amount=$msats").optString("pr")
-            if (bolt11Msats(invoice) != msats) throw UserError("The invoice amount does not match.")
+            if (bolt11Msats(invoice) != msats) throw UserError(str(R.string.the_invoice_amount_does_not_match))
             pay(invoice)
         } else {
             pay(text)

@@ -4,6 +4,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -71,7 +73,7 @@ fun AttachImageButton(onUploaded: (Upload) -> Unit) {
         if (busy) {
             CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
         } else {
-            Icon(Icons.Rounded.AddPhotoAlternate, "Add image")
+            Icon(Icons.Rounded.AddPhotoAlternate, str(R.string.add_image))
         }
     }
 }
@@ -85,7 +87,7 @@ fun AttachedImages(items: List<Upload>, onRemove: (Upload) -> Unit) {
             Box {
                 NetImage(upload.url, 88.dp, Modifier.size(88.dp).clip(RoundedCornerShape(16.dp)))
                 IconButton({ onRemove(upload) }, Modifier.align(Alignment.TopEnd).size(32.dp)) {
-                    Icon(Icons.Rounded.Close, "Remove image")
+                    Icon(Icons.Rounded.Close, str(R.string.remove_image))
                 }
             }
         }
@@ -112,7 +114,7 @@ fun EmojiSheet(onPick: (String) -> Unit, onDismiss: () -> Unit) {
     var other by remember { mutableStateOf("") }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("React", style = MaterialTheme.typography.titleLarge)
+            Text(str(R.string.react), style = MaterialTheme.typography.titleLarge)
             LazyVerticalGrid(GridCells.Fixed(8), Modifier.fillMaxWidth()) {
                 items(EMOJI) { emoji ->
                     Box(
@@ -122,8 +124,8 @@ fun EmojiSheet(onPick: (String) -> Unit, onDismiss: () -> Unit) {
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(other, { other = it }, label = { Text("Any emoji") }, singleLine = true, modifier = Modifier.weight(1f))
-                TextButton({ onPick(firstGrapheme(other.trim()).ifEmpty { DEFAULT_REACTION }) }, enabled = other.isNotBlank()) { Text("React") }
+                OutlinedTextField(other, { other = it }, label = { Text(str(R.string.any_emoji)) }, singleLine = true, modifier = Modifier.weight(1f))
+                TextButton({ onPick(firstGrapheme(other.trim()).ifEmpty { DEFAULT_REACTION }) }, enabled = other.isNotBlank()) { Text(str(R.string.react)) }
             }
         }
     }

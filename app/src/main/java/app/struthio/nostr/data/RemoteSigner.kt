@@ -5,6 +5,8 @@
  */
 package app.struthio.nostr.data
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import app.struthio.nostr.core.Draft
 import app.struthio.nostr.core.Event
 import app.struthio.nostr.core.Filter
@@ -69,10 +71,10 @@ class RemoteSigner(
             .put("tags", JSONArray(draft.tags.map { JSONArray(it) }))
             .put("created_at", draft.createdAt)
         val reply = session.request("sign_event", listOf(unsigned.toString()))
-        val event = Event.parse(reply) ?: throw UserError("The remote signer sent back something that isn't an event.")
+        val event = Event.parse(reply) ?: throw UserError(str(R.string.the_remote_signer_sent_back_something))
         // Never trust what comes back: it must be validly signed, by this account, and be what was asked.
         if (!event.isValid() || event.pubkey != pubkey || event.id != draft.id) {
-            throw UserError("The remote signer returned an event that doesn't match what was asked.")
+            throw UserError(str(R.string.the_remote_signer_returned_an_event))
         }
         return event
     }
@@ -138,7 +140,7 @@ class RemoteSigner(
         suspend fun request(method: String, params: List<String>, timeoutMs: Long = REQUEST_MS): String {
             // In the background Zino has no connections, so the signer can't be reached; say so now
             // rather than after a long wait.
-            if (!pool.inForeground) throw UserError("Open Zino to use your remote signer.")
+            if (!pool.inForeground) throw UserError(str(R.string.open_zino_to_use_your_remote))
             val id = Hex.encode(ByteArray(8).also { random.nextBytes(it) })
             val body = JSONObject().put("id", id).put("method", method).put("params", JSONArray(params))
             val draft = Draft(client.pubkey, nowSeconds(), Kind.NOSTR_CONNECT, listOf(listOf("p", remote)), Nip44.encrypt(body.toString(), conversation))
@@ -146,11 +148,11 @@ class RemoteSigner(
             waiting[id] = answer
             try {
                 val sent = pool.publishFirst(client.signNow(draft), relays.toSet())
-                if (!sent.ok) throw UserError("Couldn't reach your remote signer's relays.")
+                if (!sent.ok) throw UserError(str(R.string.couldn_t_reach_your_remote_signer))
                 // Approving on a web page can take a while, so an auth challenge earns a longer wait.
                 val reply = withTimeoutOrNull(timeoutMs) { answer.await() }
-                    ?: throw UserError("Your remote signer didn't answer. Check that it's online.")
-                reply.optString("error").takeIf { it.isNotBlank() }?.let { throw UserError("Remote signer: $it") }
+                    ?: throw UserError(str(R.string.your_remote_signer_didn_t_answer))
+                reply.optString("error").takeIf { it.isNotBlank() }?.let { throw UserError(str(R.string.remote_signer_x, it)) }
                 return reply.optString("result")
             } finally {
                 waiting.remove(id)

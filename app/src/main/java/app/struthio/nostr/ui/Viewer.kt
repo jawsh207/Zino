@@ -4,6 +4,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import android.content.Intent
 import android.media.MediaPlayer
 import android.net.Uri
@@ -102,7 +104,7 @@ private fun ZoomableImage(url: String, onDismiss: () -> Unit) {
         } else {
             Image(
                 image.asImageBitmap(),
-                "Image",
+                str(R.string.image),
                 Modifier
                     .fillMaxWidth()
                     .graphicsLayer {
@@ -130,7 +132,7 @@ fun ImageViewer(urls: List<String>, start: Int, onClose: () -> Unit) {
                 onClose,
                 Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp),
                 colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xB3000000), contentColor = Color.White),
-            ) { Icon(Icons.Rounded.Close, "Close") }
+            ) { Icon(Icons.Rounded.Close, str(R.string.close)) }
         }
     }
 }
@@ -162,7 +164,7 @@ fun VideoCard(url: String, thumbnail: String? = null, aspect: Float = 16f / 9f, 
         contentAlignment = Alignment.Center,
     ) {
         when {
-            failed -> TextButton(openExternally) { Text("Open in another app", color = Color.White) }
+            failed -> TextButton(openExternally) { Text(str(R.string.open_in_another_app), color = Color.White) }
             playing -> {
                 AndroidView(
                     factory = {
@@ -202,7 +204,7 @@ fun VideoCard(url: String, thumbnail: String? = null, aspect: Float = 16f / 9f, 
                     Modifier.size(64.dp),
                     shape = CircleShape,
                     colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xB3000000), contentColor = Color.White),
-                ) { Icon(Icons.Rounded.PlayArrow, "Play video", Modifier.size(36.dp)) }
+                ) { Icon(Icons.Rounded.PlayArrow, str(R.string.play_video), Modifier.size(36.dp)) }
                 seconds?.let {
                     Text(
                         formatDuration(it),

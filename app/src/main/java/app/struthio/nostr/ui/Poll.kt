@@ -4,6 +4,9 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.plural
+import app.struthio.nostr.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -107,7 +110,7 @@ fun PollCard(event: Event, poll: Poll) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        if (chosen) Icon(Icons.Rounded.Check, "Your choice", tint = MaterialTheme.colorScheme.primary)
+                        if (chosen) Icon(Icons.Rounded.Check, str(R.string.your_choice), tint = MaterialTheme.colorScheme.primary)
                         Text(option.label, modifier = Modifier.weight(1f), fontWeight = if (chosen) FontWeight.SemiBold else null)
                         if (showResults) Text("${(share * 100).toInt()}%", style = MaterialTheme.typography.labelLarge)
                     }
@@ -115,15 +118,15 @@ fun PollCard(event: Event, poll: Poll) {
             }
         }
         if (poll.multiple && !ended && picked.isNotEmpty()) {
-            FilledTonalButton({ send(picked.toList()) }, enabled = !busy) { Text("Vote") }
+            FilledTonalButton({ send(picked.toList()) }, enabled = !busy) { Text(str(R.string.vote)) }
         }
         val parts = listOfNotNull(
-            if (result.voters == 1) "1 vote" else "${result.voters} votes",
-            "Choose several".takeIf { poll.multiple },
+            plural(R.plurals.votes, result.voters, result.voters),
+            str(R.string.choose_several).takeIf { poll.multiple },
             when {
                 poll.endsAt == null -> null
-                ended -> "Ended"
-                else -> "Ends in " + timeLeft(poll.endsAt - nowSeconds())
+                ended -> str(R.string.ended)
+                else -> str(R.string.ends_in_x, timeLeft(poll.endsAt - nowSeconds()))
             },
         )
         Text(parts.joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -132,9 +135,9 @@ fun PollCard(event: Event, poll: Poll) {
 
 /** Time left in short form, like 2d or 5h. */
 internal fun timeLeft(seconds: Long): String = when {
-    seconds >= 86400 -> "${seconds / 86400}d"
-    seconds >= 3600 -> "${seconds / 3600}h"
-    else -> "${maxOf(1, seconds / 60)}m"
+    seconds >= 86400 -> str(R.string.x_d, seconds / 86400)
+    seconds >= 3600 -> str(R.string.x_h, seconds / 3600)
+    else -> str(R.string.x_m, maxOf(1, seconds / 60))
 }
 
 /** The choices a new poll is being built from. */
@@ -155,19 +158,19 @@ fun PollEditor(draft: PollDraft) {
                 OutlinedTextField(
                     text,
                     { draft.options[index] = it.take(100) },
-                    placeholder = { Text("Option ${index + 1}") },
+                    placeholder = { Text(str(R.string.option_x, index + 1)) },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
                 if (draft.options.size > 2) {
-                    IconButton({ draft.options.removeAt(index) }) { Icon(Icons.Rounded.Close, "Remove option") }
+                    IconButton({ draft.options.removeAt(index) }) { Icon(Icons.Rounded.Close, str(R.string.remove_option)) }
                 }
             }
         }
-        if (draft.options.size < MAX_OPTIONS) TextButton({ draft.options += "" }) { Text("Add option") }
+        if (draft.options.size < MAX_OPTIONS) TextButton({ draft.options += "" }) { Text(str(R.string.add_option)) }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(draft.multiple, { draft.multiple = !draft.multiple }, { Text("Choose several") })
-            listOf(1 to "1 day", 3 to "3 days", 7 to "7 days", null to "No end").forEach { (days, label) ->
+            FilterChip(draft.multiple, { draft.multiple = !draft.multiple }, { Text(str(R.string.choose_several)) })
+            listOf(1 to str(R.string.n_1_day), 3 to str(R.string.n_3_days), 7 to str(R.string.n_7_days), null to str(R.string.no_end)).forEach { (days, label) ->
                 FilterChip(draft.days == days, { draft.days = days }, { Text(label) })
             }
         }

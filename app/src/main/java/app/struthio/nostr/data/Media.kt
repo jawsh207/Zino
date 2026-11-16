@@ -4,6 +4,8 @@
  */
 package app.struthio.nostr.data
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -36,7 +38,7 @@ class MediaUploader(private val core: Core, private val context: Context) {
 
     /** Reads a picked file's bytes. */
     private fun read(uri: Uri): ByteArray =
-        context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw UserError("Could not open that file.")
+        context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw UserError(str(R.string.could_not_open_that_file))
 
     /** Which way up the photo was taken, from its EXIF data. */
     private fun orientation(bytes: ByteArray): Int = runCatching {
@@ -60,7 +62,7 @@ class MediaUploader(private val core: Core, private val context: Context) {
     /** Turns a picked photo into an upright, size-limited JPEG with no EXIF data. */
     suspend fun prepareImage(uri: Uri): Prepared = withContext(Dispatchers.IO) {
         val bytes = read(uri)
-        if (bytes.size > MAX_BYTES) throw UserError("That file is too large.")
+        if (bytes.size > MAX_BYTES) throw UserError(str(R.string.that_file_is_too_large))
         val mime = context.contentResolver.getType(uri)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
@@ -68,7 +70,7 @@ class MediaUploader(private val core: Core, private val context: Context) {
         var sample = 1
         while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_EDGE) sample *= 2
         val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
-            ?: throw UserError("That image could not be read.")
+            ?: throw UserError(str(R.string.that_image_could_not_be_read))
         val straight = upright(decoded, orientation(bytes))
         val scale = MAX_EDGE.toFloat() / maxOf(straight.width, straight.height)
         val sized = if (scale < 1f) {
@@ -86,7 +88,7 @@ class MediaUploader(private val core: Core, private val context: Context) {
         val type = context.contentResolver.getType(uri) ?: "application/octet-stream"
         if (type.startsWith("image/") && type != "image/gif") return@withContext prepareImage(uri)
         val bytes = read(uri)
-        if (bytes.size > MAX_BYTES) throw UserError("That file is too large.")
+        if (bytes.size > MAX_BYTES) throw UserError(str(R.string.that_file_is_too_large))
         Prepared(bytes, type, 0, 0)
     }
 
@@ -98,7 +100,7 @@ class MediaUploader(private val core: Core, private val context: Context) {
 
     /** Tries each server in turn: blobs are addressed by hash, so any of them will do. */
     suspend fun upload(bytes: ByteArray, type: String): Upload = withContext(Dispatchers.IO) {
-        val active = core.signer.value ?: throw UserError("Sign in first.")
+        val active = core.signer.value ?: throw UserError(str(R.string.sign_in_first))
         val hash = Hex.encode(sha256(bytes))
         var failure: String? = null
         for (server in core.mediaServers()) {
@@ -112,7 +114,7 @@ class MediaUploader(private val core: Core, private val context: Context) {
                     type,
                     mapOf("Authorization" to "Nostr $token", "X-SHA-256" to hash),
                 )
-                if (result.optString("sha256") != hash) throw UserError("The server changed the file.")
+                if (result.optString("sha256") != hash) throw UserError(str(R.string.the_server_changed_the_file))
                 val url = result.getString("url")
                 require(url.startsWith("https://"))
                 return@withContext Upload(url, hash, type, bytes.size, 0, 0)
@@ -122,7 +124,7 @@ class MediaUploader(private val core: Core, private val context: Context) {
                 failure = e.message
             }
         }
-        throw UserError(failure?.let { "Upload failed: $it" } ?: "Upload failed.")
+        throw UserError(failure?.let { str(R.string.upload_failed_x, it) } ?: str(R.string.upload_failed))
     }
 
     private companion object {

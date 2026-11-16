@@ -4,6 +4,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -91,7 +93,7 @@ fun WalletScreen(pending: String?, onConsumed: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        Text("Wallet", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(16.dp))
+        Text(str(R.string.wallet), style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(16.dp))
         if (!connected) {
             ConnectWallet()
             return@Column
@@ -102,27 +104,27 @@ fun WalletScreen(pending: String?, onConsumed: () -> Unit) {
             modifier = Modifier.fillMaxWidth().padding(horizontal = PageGutter),
         ) {
             Column(Modifier.padding(24.dp)) {
-                Text("Balance", style = MaterialTheme.typography.labelLarge)
+                Text(str(R.string.balance), style = MaterialTheme.typography.labelLarge)
                 Text(
-                    balance?.let { NumberFormat.getIntegerInstance().format(it / 1000) + " sats" } ?: "—",
+                    balance?.let { str(R.string.x_sats, NumberFormat.getIntegerInstance().format(it / 1000)) } ?: "—",
                     style = MaterialTheme.typography.displaySmall,
                     fontWeight = FontWeight.SemiBold,
                 )
                 problem?.let {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "Couldn't reach your wallet: $it",
+                            str(R.string.couldn_t_reach_your_wallet_x, it),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                             modifier = Modifier.weight(1f),
                         )
-                        TextButton({ scope.launch { wallet.refresh() } }) { Text("Retry") }
+                        TextButton({ scope.launch { wallet.refresh() } }) { Text(str(R.string.retry)) }
                     }
                 }
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button({ sheet = "send" }, Modifier.weight(1f)) { Text("Send") }
-                    FilledTonalButton({ sheet = "receive" }, Modifier.weight(1f)) { Text("Receive") }
+                    Button({ sheet = "send" }, Modifier.weight(1f)) { Text(str(R.string.send)) }
+                    FilledTonalButton({ sheet = "receive" }, Modifier.weight(1f)) { Text(str(R.string.receive)) }
                 }
             }
         }
@@ -132,20 +134,20 @@ fun WalletScreen(pending: String?, onConsumed: () -> Unit) {
                     segmentShape(index, transactions.size),
                     null,
                     headlineContent = {
-                        Text(NumberFormat.getIntegerInstance().format(t.msats / 1000) + " sats")
+                        Text(str(R.string.x_sats, NumberFormat.getIntegerInstance().format(t.msats / 1000)))
                     },
                     supportingContent = t.description.takeIf { it.isNotBlank() }?.let { { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
                     leadingContent = {
                         Icon(
                             if (t.incoming) Icons.AutoMirrored.Rounded.CallReceived else Icons.AutoMirrored.Rounded.CallMade,
-                            if (t.incoming) "Received" else "Sent",
+                            if (t.incoming) str(R.string.received) else str(R.string.sent),
                         )
                     },
                     trailingContent = { Text(relativeTime(t.createdAt)) },
                 )
             }
             item {
-                TextButton({ wallet.disconnect() }, Modifier.padding(8.dp)) { Text("Disconnect wallet") }
+                TextButton({ wallet.disconnect() }, Modifier.padding(8.dp)) { Text(str(R.string.disconnect_wallet)) }
             }
         }
     }
@@ -169,9 +171,9 @@ private fun ConnectWallet() {
         modifier = Modifier.fillMaxWidth().padding(horizontal = PageGutter),
     ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Connect a Lightning wallet", style = MaterialTheme.typography.titleMedium)
+            Text(str(R.string.connect_a_lightning_wallet), style = MaterialTheme.typography.titleMedium)
             Text(
-                "Paste a Nostr Wallet Connect link from your wallet. Your funds stay there; Zino only asks it to pay or create invoices.",
+                str(R.string.paste_a_nostr_wallet_connect_link),
                 style = MaterialTheme.typography.bodyMedium,
             )
             OutlinedTextField(
@@ -194,7 +196,7 @@ private fun ConnectWallet() {
                     }
                 },
                 enabled = uri.isNotBlank() && !busy,
-            ) { Text(if (busy) "Connecting…" else "Connect") }
+            ) { Text(if (busy) str(R.string.connecting) else str(R.string.connect)) }
         }
     }
 }
@@ -210,11 +212,11 @@ private fun SendSheet(onDismiss: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Send", style = MaterialTheme.typography.titleLarge)
+            Text(str(R.string.send), style = MaterialTheme.typography.titleLarge)
             OutlinedTextField(
                 target,
                 { target = it },
-                label = { Text("Invoice or Lightning address") },
+                label = { Text(str(R.string.invoice_or_lightning_address)) },
                 trailingIcon = { ScanButton { target = it.removePrefix("lightning:") } },
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -222,7 +224,7 @@ private fun SendSheet(onDismiss: () -> Unit) {
                 OutlinedTextField(
                     amount,
                     { amount = it.filter(Char::isDigit).take(9) },
-                    label = { Text("Amount in sats") },
+                    label = { Text(str(R.string.amount_in_sats)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -233,7 +235,7 @@ private fun SendSheet(onDismiss: () -> Unit) {
                     scope.act(nav) {
                         try {
                             core.wallet.send(target, amount.toLongOrNull())
-                            nav.say("Payment sent")
+                            nav.say(str(R.string.payment_sent))
                             onDismiss()
                         } finally {
                             busy = false
@@ -242,7 +244,7 @@ private fun SendSheet(onDismiss: () -> Unit) {
                 },
                 enabled = target.isNotBlank() && !busy,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text(if (busy) "Sending…" else "Pay") }
+            ) { Text(if (busy) str(R.string.sending) else str(R.string.pay)) }
         }
     }
 }
@@ -259,22 +261,22 @@ private fun ReceiveSheet(onDismiss: () -> Unit) {
     var invoice by remember { mutableStateOf<String?>(null) }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Receive", style = MaterialTheme.typography.titleLarge)
+            Text(str(R.string.receive), style = MaterialTheme.typography.titleLarge)
             val ready = invoice
             if (ready == null) {
                 OutlinedTextField(
                     amount,
                     { amount = it.filter(Char::isDigit).take(9) },
-                    label = { Text("Amount in sats") },
+                    label = { Text(str(R.string.amount_in_sats)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(memo, { memo = it }, label = { Text("Description (optional)") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(memo, { memo = it }, label = { Text(str(R.string.description_optional)) }, modifier = Modifier.fillMaxWidth())
                 Button(
                     onClick = { scope.act(nav) { invoice = core.wallet.makeInvoice(amount.toLong(), memo) } },
                     enabled = (amount.toLongOrNull() ?: 0) > 0,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Create invoice") }
+                ) { Text(str(R.string.create_invoice)) }
             } else {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                     QrImage(ready.uppercase())
@@ -282,8 +284,8 @@ private fun ReceiveSheet(onDismiss: () -> Unit) {
                 Row {
                     Button({
                         context.copy(ready)
-                        nav.say("Invoice copied")
-                    }) { Text("Copy invoice") }
+                        nav.say(str(R.string.invoice_copied))
+                    }) { Text(str(R.string.copy_invoice)) }
                     Spacer(Modifier.width(8.dp))
                 }
             }

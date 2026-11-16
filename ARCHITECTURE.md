@@ -160,6 +160,14 @@ Message notifications never say who sent the message or what it says.
 - **Uploads.** `data/Media.kt` uploads to Blossom servers (NIP-B7). Photos are turned upright and re-encoded first, which removes location and other hidden details.
 - **Downloads.** Pictures are fetched with `net/Http.kt`. They're cached on disk, and decoded pictures are kept in memory (`Images` in `ui/Common.kt`).
 
+## Text and languages
+
+Every word Zino shows lives in `app/src/main/res/values/strings.xml`. Code asks for text with `str(R.string.name)`, or `plural(R.plurals.name, count)` for text that changes with a number. Both are in `Texts.kt`, and unlike Compose's own `stringResource` they work anywhere: in click handlers, in Core's error messages and in notifications.
+
+A translation is a copy of that file in a `values-xx` folder, like `values-de`. Android then picks the language from the phone's settings, or from Zino's own entry in the system's per-app language setting. Changing the language restarts the screen, so nothing keeps the old language.
+
+Some text still comes in English from places that can't use Android resources: what relays say about themselves, the relay details read by `core/Protocols.kt`, the account check report, and messages from `net/`.
+
 ## Screens
 
 `ui/App.kt` holds the four tabs (Home, Messages, Wallet, Notifications) and a stack of screens opened on top of them (`Screen` and `Nav`).

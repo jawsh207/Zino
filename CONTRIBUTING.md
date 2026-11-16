@@ -15,6 +15,12 @@ Descriptions are part of the change itself, not something to add later.
 
 `python3 scripts/docs-check.py` lists anything left undescribed. CI runs it on every push, and the build fails until it passes.
 
+## Text
+
+- **Every word the app shows goes in `app/src/main/res/values/strings.xml`.** Read it in code with `str(R.string.name)`, or `plural(R.plurals.name, count, …)` for counts. Don't write text into Kotlin.
+- **Use whole sentences with placeholders**, like `Replying to %1$s`, instead of joining pieces, so translators can reorder words.
+- **Translations** go in a copy of the file under `values-xx` (for example `values-de` or `values-pt-rBR`). Keep every name and every `%1$s`.
+
 ## Protocol
 
 - Implement only current, official NIPs, in their current form. Write no deprecated formats.

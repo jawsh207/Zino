@@ -4,6 +4,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
@@ -239,11 +241,11 @@ fun QrScanner(onResult: (String) -> Unit, onClose: () -> Unit) {
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
             when {
-                failed -> Text("The camera could not be opened.", color = Color.White)
+                failed -> Text(str(R.string.the_camera_could_not_be_opened), color = Color.White)
                 granted -> CameraPreview(onResult) { failed = true }
                 else -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Zino needs the camera to scan codes.", color = Color.White)
-                    Button({ ask.launch(Manifest.permission.CAMERA) }) { Text("Allow camera") }
+                    Text(str(R.string.zino_needs_the_camera_to_scan), color = Color.White)
+                    Button({ ask.launch(Manifest.permission.CAMERA) }) { Text(str(R.string.allow_camera)) }
                 }
             }
             FilledIconButton(
@@ -251,11 +253,11 @@ fun QrScanner(onResult: (String) -> Unit, onClose: () -> Unit) {
                 Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp),
                 colors = IconButtonDefaults.filledIconButtonColors(containerColor = Scrim, contentColor = Color.White),
             ) {
-                Icon(Icons.Rounded.Close, "Close")
+                Icon(Icons.Rounded.Close, str(R.string.close))
             }
             if (granted && !failed) {
                 Text(
-                    "Point at a QR code",
+                    str(R.string.point_at_a_qr_code),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier
@@ -274,7 +276,7 @@ fun QrScanner(onResult: (String) -> Unit, onClose: () -> Unit) {
 @Composable
 fun ScanButton(onResult: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    IconButton({ open = true }) { Icon(Icons.Rounded.QrCodeScanner, "Scan QR code") }
+    IconButton({ open = true }) { Icon(Icons.Rounded.QrCodeScanner, str(R.string.scan_qr_code)) }
     if (open) {
         QrScanner({
             open = false

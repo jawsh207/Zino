@@ -5,6 +5,8 @@
  */
 package app.struthio.nostr.data
 
+import app.struthio.nostr.str
+import app.struthio.nostr.plural
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -64,8 +66,8 @@ object Notifier {
 
     /** Creates the two notification channels: activity, and private messages. */
     private fun channels(manager: NotificationManager) {
-        manager.createNotificationChannel(NotificationChannel(ACTIVITY, "Activity", NotificationManager.IMPORTANCE_DEFAULT))
-        manager.createNotificationChannel(NotificationChannel(MESSAGES, "Private messages", NotificationManager.IMPORTANCE_HIGH))
+        manager.createNotificationChannel(NotificationChannel(ACTIVITY, str(R.string.activity), NotificationManager.IMPORTANCE_DEFAULT))
+        manager.createNotificationChannel(NotificationChannel(MESSAGES, str(R.string.private_messages), NotificationManager.IMPORTANCE_HIGH))
     }
 
     /** What tapping a notification opens: the post it's about, or just the app. */
@@ -88,7 +90,7 @@ object Notifier {
         if (!manager.areNotificationsEnabled()) return
         channels(manager)
         if (messages > 0) {
-            val text = if (messages == 1) "New private message" else "$messages new private messages"
+            val text = plural(R.plurals.new_private_messages, messages, messages)
             manager.notify(
                 MESSAGES_ID,
                 builder(context, MESSAGES).setContentTitle(text).setContentIntent(open(context, MESSAGES_ID, null)).build(),
@@ -98,7 +100,7 @@ object Notifier {
             manager.notify(
                 SUMMARY_ID,
                 builder(context, ACTIVITY)
-                    .setContentTitle("${alerts.size} new notifications")
+                    .setContentTitle(str(R.string.x_new_notifications, alerts.size))
                     .setContentText(alerts.first().headline(name(alerts.first().actor)))
                     .setContentIntent(open(context, SUMMARY_ID, null))
                     .build(),

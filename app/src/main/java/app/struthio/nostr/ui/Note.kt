@@ -5,6 +5,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.core.animateDpAsState
@@ -158,7 +160,7 @@ private fun BoostLine(pubkey: String) {
     ) {
         Icon(Icons.Rounded.Repeat, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(
-            "${core.displayName(pubkey)} boosted",
+            str(R.string.x_boosted, core.displayName(pubkey)),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
@@ -186,7 +188,7 @@ fun NoteHeader(event: Event) {
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 if (profile?.verified == true) {
-                    Icon(Icons.Rounded.Verified, "Verified", Modifier.padding(start = 4.dp).size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Rounded.Verified, str(R.string.verified), Modifier.padding(start = 4.dp).size(14.dp), tint = MaterialTheme.colorScheme.primary)
                 }
                 Text(
                     " · " + relativeTime(event.createdAt),
@@ -235,9 +237,9 @@ fun NoteBody(event: Event, detail: Boolean = false, inQuote: Boolean = false) {
             color = MaterialTheme.colorScheme.surfaceContainer,
         ) {
             Column(Modifier.padding(16.dp)) {
-                Text("Sensitive content", style = MaterialTheme.typography.titleSmall)
+                Text(str(R.string.sensitive_content), style = MaterialTheme.typography.titleSmall)
                 warning.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                Text("Tap to show", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                Text(str(R.string.tap_to_show), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             }
         }
         return
@@ -363,7 +365,7 @@ internal fun QuoteCard(ref: Entity) {
     ) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
             if (event == null) {
-                Text("Loading note…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(str(R.string.loading_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 LaunchedEffect(event.pubkey) { core.wantProfile(event.pubkey) }
                 Row {
@@ -439,21 +441,21 @@ private fun Actions(event: Event, onReply: ((Event) -> Unit)? = null) {
     ) {
         ActionButton(
             Icons.Outlined.ChatBubbleOutline, count(stats.comments.toLong()), false, colors.secondaryContainer,
-            colors.onSecondaryContainer, "Comments",
+            colors.onSecondaryContainer, str(R.string.comments),
         ) { if (onReply != null) onReply(event) else nav.push(Screen.Thread(event.id)) }
         androidx.compose.foundation.layout.Box(Modifier.weight(1f)) {
             Row {
                 ActionButton(
                     Icons.Rounded.Repeat, count(stats.boosts.toLong()), stats.mineBoosted, colors.primaryContainer,
-                    colors.onPrimaryContainer, "Boost or quote",
+                    colors.onPrimaryContainer, str(R.string.boost_or_quote),
                 ) { boostMenu = true }
             }
             DropdownMenu(boostMenu, { boostMenu = false }) {
-                DropdownMenuItem(text = { Text("Boost") }, onClick = {
+                DropdownMenuItem(text = { Text(str(R.string.boost)) }, onClick = {
                     boostMenu = false
                     scope.act(nav) { core.boost(event) }
                 })
-                DropdownMenuItem(text = { Text("Quote") }, onClick = {
+                DropdownMenuItem(text = { Text(str(R.string.quote)) }, onClick = {
                     boostMenu = false
                     nav.push(Screen.Compose(quote = event.id))
                 })
@@ -463,7 +465,7 @@ private fun Actions(event: Event, onReply: ((Event) -> Unit)? = null) {
         ActionButton(
             Icons.Outlined.FavoriteBorder.takeIf { shown.isEmpty() },
             count(stats.reactions.toLong()), stats.mine != null, colors.secondaryContainer,
-            colors.onSecondaryContainer, "Reactions",
+            colors.onSecondaryContainer, str(R.string.reactions),
             glyphs = shown,
             emoji = stats.emoji,
             onLongClick = { picking = true },
@@ -474,7 +476,7 @@ private fun Actions(event: Event, onReply: ((Event) -> Unit)? = null) {
         ActionButton(
             if (stats.mineZapped) Icons.Rounded.Bolt else Icons.Outlined.Bolt,
             count(stats.zapMsats / 1000), stats.mineZapped, colors.tertiaryContainer,
-            colors.onTertiaryContainer, "Zaps", 1.15f,
+            colors.onTertiaryContainer, str(R.string.zaps), 1.15f,
         ) { zapping = true }
     }
     if (zapping) ZapSheet(event, event.pubkey) { zapping = false }
@@ -502,7 +504,7 @@ fun ZapSheet(event: Event?, recipient: String, onDismiss: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Zap ${core.displayName(recipient)}", style = MaterialTheme.typography.titleLarge)
+            Text(str(R.string.zap_x, core.displayName(recipient)), style = MaterialTheme.typography.titleLarge)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(21L, 100L, 500L, 1000L, 5000L).forEach { value ->
                     FilterChip(amount == value.toString(), { amount = value.toString() }, { Text(compact(value)) })
@@ -511,12 +513,12 @@ fun ZapSheet(event: Event?, recipient: String, onDismiss: () -> Unit) {
             OutlinedTextField(
                 amount,
                 { amount = it.filter(Char::isDigit).take(9) },
-                label = { Text("Amount in sats") },
+                label = { Text(str(R.string.amount_in_sats)) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth(),
             )
-            OutlinedTextField(comment, { comment = it }, label = { Text("Comment (optional)") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(comment, { comment = it }, label = { Text(str(R.string.comment_optional)) }, modifier = Modifier.fillMaxWidth())
             Button(
                 onClick = {
                     val sats = amount.toLongOrNull() ?: 0
@@ -529,7 +531,7 @@ fun ZapSheet(event: Event?, recipient: String, onDismiss: () -> Unit) {
                             invoices.firstOrNull()?.let { invoice ->
                                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("lightning:$invoice")))
                             }
-                            nav.say("Zap sent")
+                            nav.say(str(R.string.zap_sent))
                             onDismiss()
                         } finally {
                             busy = false
@@ -541,7 +543,7 @@ fun ZapSheet(event: Event?, recipient: String, onDismiss: () -> Unit) {
             ) {
                 Icon(Icons.Rounded.Bolt, null)
                 Spacer(Modifier.width(8.dp))
-                Text(if (busy) "Zapping…" else "Zap")
+                Text(if (busy) str(R.string.zapping) else str(R.string.zap))
             }
         }
     }
@@ -586,7 +588,7 @@ fun linkedText(parts: List<Part>, emoji: Map<String, String>): AnnotatedString {
                         core.scope.launch {
                             val found = core.fetchAddress(entity.kind, entity.author, entity.identifier, entity.relays)
                             withContext(Dispatchers.Main) {
-                                if (found != null) nav.push(Screen.Thread(found.id)) else nav.say("Couldn't find that post")
+                                if (found != null) nav.push(Screen.Thread(found.id)) else nav.say(str(R.string.couldn_t_find_that_post))
                             }
                         }
                     }) { append("post") }

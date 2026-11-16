@@ -5,6 +5,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import android.net.Uri
 import androidx.compose.material.icons.rounded.AddReaction
 import androidx.compose.material3.AlertDialog
@@ -122,6 +124,28 @@ import app.struthio.nostr.data.roomKey
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 
+/** A profile tab's name, in the phone's language. */
+private val ProfileTab.title: String
+    get() = str(
+        when (this) {
+            ProfileTab.POSTS -> R.string.posts
+            ProfileTab.REPLIES -> R.string.replies
+            ProfileTab.BOOSTS -> R.string.boosts
+            ProfileTab.GALLERY -> R.string.gallery
+        },
+    )
+
+/** What a profile tab says when it has nothing to show. */
+private val ProfileTab.emptyText: String
+    get() = str(
+        when (this) {
+            ProfileTab.POSTS -> R.string.no_posts_yet
+            ProfileTab.REPLIES -> R.string.no_replies_yet
+            ProfileTab.BOOSTS -> R.string.no_boosts_yet
+            ProfileTab.GALLERY -> R.string.no_pictures_or_videos_yet
+        },
+    )
+
 /** Copies text to the clipboard. */
 fun Context.copy(text: String) {
     (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Zino", text))
@@ -181,14 +205,14 @@ fun ProfileScreen(pubkey: String) {
     }
 
     Box(Modifier.fillMaxSize()) {
-        NoteList(feed, Modifier.fillMaxSize(), state = listState, pillTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 72.dp, empty = tab.empty, filter = tab::shows, gallery = tab == ProfileTab.GALLERY, header = {
+        NoteList(feed, Modifier.fillMaxSize(), state = listState, pillTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 72.dp, empty = tab.emptyText, filter = tab::shows, gallery = tab == ProfileTab.GALLERY, header = {
             Column(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 ProfileBanner(pubkey, profile?.banner)
                 Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             EmojiText(core.richName(pubkey), profile?.emoji.orEmpty(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f, fill = false))
                             if (profile?.verified == true) {
-                                Icon(Icons.Rounded.Verified, "Verified", Modifier.padding(start = 6.dp).size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Rounded.Verified, str(R.string.verified), Modifier.padding(start = 6.dp).size(18.dp), tint = MaterialTheme.colorScheme.primary)
                             }
                         }
                         profile?.nip05?.let { Text(it.removePrefix("_@"), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -199,7 +223,7 @@ fun ProfileScreen(pubkey: String) {
                     if (general != null) {
                         StatusLine(general, onClick = { editingStatus = true })
                     } else {
-                        InfoLine(Icons.Rounded.AddReaction, "Set a status", "Set a status") { editingStatus = true }
+                        InfoLine(Icons.Rounded.AddReaction, str(R.string.set_a_status), str(R.string.set_a_status)) { editingStatus = true }
                     }
                     statuses.filter { it.music }.forEach { StatusLine(it) }
                 } else {
@@ -214,27 +238,27 @@ fun ProfileScreen(pubkey: String) {
                     invoicesIn(about).forEach { InvoiceCard(it) }
                 }
                 profile?.website?.let { site ->
-                    InfoLine(Icons.Rounded.Link, websiteLabel(site), "Website") {
+                    InfoLine(Icons.Rounded.Link, websiteLabel(site), str(R.string.website)) {
                         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(site))) }
                     }
                 }
                 lightning?.let { address ->
                     // Tapping zaps; your own address is copied instead.
-                    InfoLine(Icons.Rounded.Bolt, address, "Lightning address") {
+                    InfoLine(Icons.Rounded.Bolt, address, str(R.string.lightning_address)) {
                         if (isMe) context.copy(address) else zapping = true
                     }
                 }
                 if (identities.isNotEmpty()) LinkedAccounts(pubkey, identities)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton({ nav.push(Screen.People(pubkey, followers = false)) }) {
-                        Text("${followingList?.size?.toLong()?.let(::compact) ?: "–"} following")
+                        Text(str(R.string.x_following, followingList?.size?.toLong()?.let(::compact) ?: "–"))
                     }
                     TextButton({ nav.push(Screen.People(pubkey, followers = true)) }) {
-                        Text(followerCount?.let { "${compact(it)} followers" } ?: "Followers")
+                        Text(followerCount?.let { str(R.string.x_followers, compact(it)) } ?: str(R.string.followers))
                     }
                 }
                 if (isMe) {
-                    FilledTonalButton({ nav.push(Screen.EditProfile) }, Modifier.fillMaxWidth()) { Text("Edit profile") }
+                    FilledTonalButton({ nav.push(Screen.EditProfile) }, Modifier.fillMaxWidth()) { Text(str(R.string.edit_profile)) }
                 } else {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         val following = pubkey in follows
@@ -250,15 +274,15 @@ fun ProfileScreen(pubkey: String) {
                             Unit
                         }
                         if (following) {
-                            FilledTonalButton(click, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Following") }
+                            FilledTonalButton(click, enabled = !busy, modifier = Modifier.weight(1f)) { Text(str(R.string.following)) }
                         } else {
-                            Button(click, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Follow") }
+                            Button(click, enabled = !busy, modifier = Modifier.weight(1f)) { Text(str(R.string.follow)) }
                         }
                         FilledTonalIconButton({
                             nav.push(Screen.Chat(roomKey(setOf(pubkey, core.me ?: ""))))
-                        }) { Icon(Icons.Outlined.ChatBubbleOutline, "Message") }
+                        }) { Icon(Icons.Outlined.ChatBubbleOutline, str(R.string.message)) }
                         // Zaps need somewhere to send them.
-                        if (lightning != null) FilledTonalIconButton({ zapping = true }) { Icon(Icons.Rounded.Bolt, "Zap") }
+                        if (lightning != null) FilledTonalIconButton({ zapping = true }) { Icon(Icons.Rounded.Bolt, str(R.string.zap)) }
                     }
                 }
                 PrimaryScrollableTabRow(
@@ -268,7 +292,7 @@ fun ProfileScreen(pubkey: String) {
                     divider = {},
                 ) {
                     ProfileTab.entries.forEach { t ->
-                        Tab(selected = tab == t, onClick = { tab = t }, text = { Text(t.label) })
+                        Tab(selected = tab == t, onClick = { tab = t }, text = { Text(t.title) })
                     }
                 }
             }
@@ -278,22 +302,22 @@ fun ProfileScreen(pubkey: String) {
             Modifier.fillMaxWidth().background(barColor).statusBarsPadding().height(64.dp).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OverBannerButton(Icons.AutoMirrored.Rounded.ArrowBack, "Back", solid) { nav.pop() }
+            OverBannerButton(Icons.AutoMirrored.Rounded.ArrowBack, str(R.string.back), solid) { nav.pop() }
             Spacer(Modifier.weight(1f))
             Box {
-                OverBannerButton(Icons.Rounded.MoreVert, "More", solid) { menu = true }
+                OverBannerButton(Icons.Rounded.MoreVert, str(R.string.more), solid) { menu = true }
             DropdownMenu(menu, { menu = false }) {
-                    DropdownMenuItem(text = { Text("Copy npub") }, onClick = {
+                    DropdownMenuItem(text = { Text(str(R.string.copy_npub)) }, onClick = {
                         menu = false
                         context.copy(Nip19.npub(pubkey))
                     })
-                    DropdownMenuItem(text = { Text("Show QR code") }, onClick = {
+                    DropdownMenuItem(text = { Text(str(R.string.show_qr_code)) }, onClick = {
                         menu = false
                         showQr = true
                     })
                     if (!isMe) {
                         val isMuted = pubkey in muted
-                        DropdownMenuItem(text = { Text(if (isMuted) "Unmute" else "Mute") }, onClick = {
+                        DropdownMenuItem(text = { Text(if (isMuted) str(R.string.unmute) else str(R.string.mute)) }, onClick = {
                             menu = false
                             scope.act(nav) { core.setMuted(pubkey, !isMuted) }
                         })
@@ -313,9 +337,9 @@ fun ProfileScreen(pubkey: String) {
                     core.setStatus(text, hours)
                     val others = statuses.filter { it.music }
                     statuses = (if (text.isBlank()) emptyList() else listOf(Status(text.trim(), false, null))) + others
-                    nav.say(if (text.isBlank()) "Status cleared" else "Status set")
+                    nav.say(if (text.isBlank()) str(R.string.status_cleared) else str(R.string.status_set))
                 } catch (e: Exception) {
-                    nav.say(e.message ?: "Couldn't set your status")
+                    nav.say(e.message ?: str(R.string.couldn_t_set_your_status))
                 }
             }
         }
@@ -339,11 +363,11 @@ fun PeopleScreen(screen: Screen.People) {
         value = if (screen.followers) core.followersOf(screen.pubkey) else core.followingOf(screen.pubkey)
     }
     Column(Modifier.fillMaxSize()) {
-        BackBar(if (screen.followers) "Followers" else "Following")
+        BackBar(if (screen.followers) str(R.string.followers) else str(R.string.following))
         val list = people
         when {
             list == null -> Loading(Modifier.fillMaxWidth().padding(48.dp))
-            list.isEmpty() -> Text("Nobody found on these relays.", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            list.isEmpty() -> Text(str(R.string.nobody_found_on_these_relays), Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             else -> LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = PageGutter, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 itemsIndexed(list, key = { _, it -> it }) { index, pubkey ->
                     PersonRow(core, pubkey, segmentShape(index, list.size)) { nav.push(Screen.Profile(pubkey)) }
@@ -413,11 +437,11 @@ fun SearchScreen() {
     }
 
     Column(Modifier.fillMaxSize().imePadding()) {
-        BackBar("Search")
+        BackBar(str(R.string.search))
         OutlinedTextField(
             query,
             { query = it },
-            placeholder = { Text("Notes, people, #tags, npub") },
+            placeholder = { Text(str(R.string.notes_people_tags_npub)) },
             leadingIcon = { Icon(Icons.Rounded.Search, null) },
             trailingIcon = {
                 Row {
@@ -425,7 +449,7 @@ fun SearchScreen() {
                         query = it.removePrefix("nostr:")
                         submit()
                     }
-                    IconButton(onClick = ::submit) { Icon(Icons.Rounded.Search, "Search") }
+                    IconButton(onClick = ::submit) { Icon(Icons.Rounded.Search, str(R.string.search)) }
                 }
             },
             singleLine = true,
@@ -433,7 +457,7 @@ fun SearchScreen() {
             modifier = Modifier.fillMaxWidth().padding(horizontal = PageGutter),
         )
         if (feed != null) {
-            NoteList(feed, Modifier.weight(1f).padding(top = 8.dp), empty = "No notes found.")
+            NoteList(feed, Modifier.weight(1f).padding(top = 8.dp), empty = str(R.string.no_notes_found))
         } else {
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = PageGutter, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 itemsIndexed(people, key = { _, it -> it }) { index, pubkey ->
@@ -455,7 +479,7 @@ fun PersonRow(core: Core, pubkey: String, shape: Shape, onClick: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 EmojiText(core.richName(pubkey), core.profiles[pubkey]?.emoji.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 if (core.profiles[pubkey]?.verified == true) {
-                    Icon(Icons.Rounded.Verified, "Verified", Modifier.padding(start = 4.dp).size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Rounded.Verified, str(R.string.verified), Modifier.padding(start = 4.dp).size(14.dp), tint = MaterialTheme.colorScheme.primary)
                 }
             }
         },
@@ -472,7 +496,7 @@ private fun StatusLine(status: Status, onClick: (() -> Unit)? = null) {
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.then(
             when {
-                onClick != null -> Modifier.clip(RoundedCornerShape(12.dp)).clickable(onClickLabel = "Change status", onClick = onClick)
+                onClick != null -> Modifier.clip(RoundedCornerShape(12.dp)).clickable(onClickLabel = str(R.string.change_status), onClick = onClick)
                 status.link != null -> Modifier.clickable { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(status.link))) } }
                 else -> Modifier
             },
@@ -508,9 +532,9 @@ private fun LinkedAccounts(pubkey: String, identities: List<Identity>) {
             val target = identity.proofUrl ?: identity.profileUrl
             AssistChip(
                 onClick = { target?.let { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) } } },
-                label = { Text("${identity.label} · ${identity.name}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                label = { Text(str(R.string.x_x, identity.label, identity.name), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 trailingIcon = if (verified) {
-                    { Icon(Icons.Rounded.Verified, "Proof checked", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary) }
+                    { Icon(Icons.Rounded.Verified, str(R.string.proof_checked), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary) }
                 } else {
                     null
                 },
@@ -547,7 +571,7 @@ fun GalleryRow(row: List<Pair<Event, GalleryItem>>) {
                 contentAlignment = Alignment.Center,
             ) {
                 when {
-                    sensitive -> Icon(Icons.Rounded.VisibilityOff, "Sensitive", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    sensitive -> Icon(Icons.Rounded.VisibilityOff, str(R.string.sensitive), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     !item.video -> NetImage(item.url, 160.dp, Modifier.fillMaxSize())
                     item.thumbnail != null -> NetImage(item.thumbnail, 160.dp, Modifier.fillMaxSize())
                     else -> {
@@ -558,7 +582,7 @@ fun GalleryRow(row: List<Pair<Event, GalleryItem>>) {
                     }
                 }
                 if (item.video && !sensitive) {
-                    Icon(Icons.Rounded.PlayArrow, "Video", Modifier.size(36.dp), tint = Color.White)
+                    Icon(Icons.Rounded.PlayArrow, str(R.string.video), Modifier.size(36.dp), tint = Color.White)
                 }
             }
         }
@@ -621,20 +645,20 @@ private fun OverBannerButton(icon: ImageVector, description: String, solid: Bool
 private fun StatusDialog(current: String, onDismiss: () -> Unit, onSave: (text: String, hours: Int?) -> Unit) {
     var text by remember { mutableStateOf(current) }
     var hours by remember { mutableStateOf<Int?>(null) }
-    val choices = listOf(null to "Don't clear", 1 to "1 hour", 4 to "4 hours", 24 to "Today", 168 to "This week")
+    val choices = listOf(null to str(R.string.don_t_clear), 1 to str(R.string.n_1_hour), 4 to str(R.string.n_4_hours), 24 to str(R.string.today), 168 to str(R.string.this_week))
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Status") },
+        title = { Text(str(R.string.status)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     text,
                     { text = it.take(140) },
-                    placeholder = { Text("What are you up to?") },
+                    placeholder = { Text(str(R.string.what_are_you_up_to)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text("Clear after", style = MaterialTheme.typography.labelLarge)
+                Text(str(R.string.clear_after), style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     choices.forEach { (h, label) ->
                         FilterChip(selected = hours == h, onClick = { hours = h }, label = { Text(label) })
@@ -643,12 +667,12 @@ private fun StatusDialog(current: String, onDismiss: () -> Unit, onSave: (text: 
             }
         },
         confirmButton = {
-            TextButton({ onSave(text, hours) }, enabled = text.isNotBlank() && (text.trim() != current || hours != null)) { Text("Set") }
+            TextButton({ onSave(text, hours) }, enabled = text.isNotBlank() && (text.trim() != current || hours != null)) { Text(str(R.string.set)) }
         },
         dismissButton = {
             Row {
-                if (current.isNotEmpty()) TextButton({ onSave("", null) }) { Text("Clear") }
-                TextButton(onDismiss) { Text("Cancel") }
+                if (current.isNotEmpty()) TextButton({ onSave("", null) }) { Text(str(R.string.clear)) }
+                TextButton(onDismiss) { Text(str(R.string.cancel)) }
             }
         },
     )

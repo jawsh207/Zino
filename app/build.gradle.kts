@@ -69,6 +69,10 @@ android {
             )
         }
     }
+    // Lets Android's per-app language setting list the languages Zino has text in.
+    androidResources {
+        generateLocaleConfig = true
+    }
     testOptions {
         unitTests.isReturnDefaultValues = true
         unitTests.isIncludeAndroidResources = true

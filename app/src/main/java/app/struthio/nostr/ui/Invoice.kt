@@ -4,6 +4,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
@@ -58,18 +60,18 @@ fun InvoiceCard(invoice: Invoice) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Rounded.Bolt, null, tint = MaterialTheme.colorScheme.primary)
-                Text(amount ?: "Any amount", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text(amount ?: str(R.string.any_amount), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 Text(
                     when {
-                        paid -> "Paid"
-                        left <= 0 -> "Expired"
-                        else -> "Expires in " + timeLeft(left)
+                        paid -> str(R.string.paid)
+                        left <= 0 -> str(R.string.expired)
+                        else -> str(R.string.expires_in_x, timeLeft(left))
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Text("Lightning invoice", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(str(R.string.lightning_invoice), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             invoice.memo?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (!paid && left > 0) {
@@ -79,27 +81,27 @@ fun InvoiceCard(invoice: Invoice) {
                                 confirming = true
                             } else {
                                 runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("lightning:" + invoice.text))) }
-                                    .onFailure { nav.say("No wallet app found. Copy the invoice instead.") }
+                                    .onFailure { nav.say(str(R.string.no_wallet_app_found_copy_the)) }
                             }
                         },
                         enabled = !paying,
-                    ) { Text(if (paying) "Paying…" else if (connected && invoice.msats != null) "Pay" else "Open in wallet") }
+                    ) { Text(if (paying) str(R.string.paying) else if (connected && invoice.msats != null) str(R.string.pay) else str(R.string.open_in_wallet)) }
                 }
                 OutlinedButton({
                     context.copy(invoice.text)
-                    nav.say("Invoice copied")
-                }) { Text("Copy") }
+                    nav.say(str(R.string.invoice_copied))
+                }) { Text(str(R.string.copy)) }
             }
         }
     }
     if (confirming) {
         AlertDialog(
             onDismissRequest = { confirming = false },
-            title = { Text("Pay ${amount.orEmpty()}?") },
+            title = { Text(str(R.string.pay_x, amount.orEmpty())) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     invoice.memo?.takeIf { it.isNotBlank() }?.let { Text(it) }
-                    Text("This pays from your connected wallet and can't be undone.")
+                    Text(str(R.string.this_pays_from_your_connected_wallet))
                 }
             },
             confirmButton = {
@@ -110,14 +112,14 @@ fun InvoiceCard(invoice: Invoice) {
                         try {
                             core.wallet.pay(invoice.text)
                             core.paidInvoices[invoice.text] = true
-                            nav.say("Paid ${amount.orEmpty()}")
+                            nav.say(str(R.string.paid_x, amount.orEmpty()))
                         } finally {
                             paying = false
                         }
                     }
-                }) { Text("Pay") }
+                }) { Text(str(R.string.pay)) }
             },
-            dismissButton = { TextButton({ confirming = false }) { Text("Cancel") } },
+            dismissButton = { TextButton({ confirming = false }) { Text(str(R.string.cancel)) } },
         )
     }
 }

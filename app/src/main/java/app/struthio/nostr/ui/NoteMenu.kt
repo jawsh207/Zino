@@ -3,6 +3,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,13 +43,13 @@ import app.struthio.nostr.data.Feed
 import app.struthio.nostr.data.FeedSource
 
 private val REPORT_TYPES = listOf(
-    "spam" to "Spam",
-    "nudity" to "Nudity",
-    "profanity" to "Hateful or abusive",
-    "illegal" to "Illegal",
-    "impersonation" to "Impersonation",
-    "malware" to "Malware",
-    "other" to "Something else",
+    "spam" to str(R.string.spam),
+    "nudity" to str(R.string.nudity),
+    "profanity" to str(R.string.hateful_or_abusive),
+    "illegal" to str(R.string.illegal),
+    "impersonation" to str(R.string.impersonation),
+    "malware" to str(R.string.malware),
+    "other" to str(R.string.something_else),
 )
 
 /** The three-dot menu on a post: copy its link, delete your own (NIP-09), or report it (NIP-56). */
@@ -66,28 +68,28 @@ fun NoteMenu(event: Event) {
 
     Box {
         IconButton({ open = true }, Modifier.size(32.dp)) {
-            Icon(Icons.Rounded.MoreVert, "More", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(Icons.Rounded.MoreVert, str(R.string.more), Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         DropdownMenu(open, { open = false }) {
-            DropdownMenuItem(text = { Text(if (saved) "Remove bookmark" else "Bookmark") }, onClick = {
+            DropdownMenuItem(text = { Text(if (saved) str(R.string.remove_bookmark) else str(R.string.bookmark)) }, onClick = {
                 open = false
                 scope.act(nav) {
                     core.setBookmarked(event, !saved)
-                    nav.say(if (saved) "Bookmark removed" else "Bookmarked")
+                    nav.say(if (saved) str(R.string.bookmark_removed) else str(R.string.bookmarked))
                 }
             })
-            DropdownMenuItem(text = { Text("Copy link") }, onClick = {
+            DropdownMenuItem(text = { Text(str(R.string.copy_link)) }, onClick = {
                 open = false
                 context.copy("nostr:" + Nip19.nevent(event.id, listOf(core.hintFor(event.id)).filter { it.isNotEmpty() }, event.pubkey))
-                nav.say("Link copied")
+                nav.say(str(R.string.link_copied))
             })
             if (mine) {
-                DropdownMenuItem(text = { Text("Delete", color = MaterialTheme.colorScheme.error) }, onClick = {
+                DropdownMenuItem(text = { Text(str(R.string.delete), color = MaterialTheme.colorScheme.error) }, onClick = {
                     open = false
                     deleting = true
                 })
             } else {
-                DropdownMenuItem(text = { Text("Report") }, onClick = {
+                DropdownMenuItem(text = { Text(str(R.string.report)) }, onClick = {
                     open = false
                     reporting = true
                 })
@@ -98,18 +100,18 @@ fun NoteMenu(event: Event) {
     if (deleting) {
         AlertDialog(
             onDismissRequest = { deleting = false },
-            title = { Text("Delete this note?") },
-            text = { Text("Relays are asked to remove it, but each one decides for itself, and copies may remain.") },
+            title = { Text(str(R.string.delete_this_note)) },
+            text = { Text(str(R.string.relays_are_asked_to_remove_it)) },
             confirmButton = {
                 TextButton({
                     deleting = false
                     scope.act(nav) {
                         core.deleteNote(event)
-                        nav.say("Note deleted")
+                        nav.say(str(R.string.note_deleted))
                     }
-                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                }) { Text(str(R.string.delete), color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton({ deleting = false }) { Text("Cancel") } },
+            dismissButton = { TextButton({ deleting = false }) { Text(str(R.string.cancel)) } },
         )
     }
     if (reporting) {
@@ -117,10 +119,10 @@ fun NoteMenu(event: Event) {
         var mute by remember { mutableStateOf(true) }
         AlertDialog(
             onDismissRequest = { reporting = false },
-            title = { Text("Report this note") },
+            title = { Text(str(R.string.report_this_note)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Reports are public events on Nostr.", style = MaterialTheme.typography.bodyMedium)
+                    Text(str(R.string.reports_are_public_events_on_nostr), style = MaterialTheme.typography.bodyMedium)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         REPORT_TYPES.forEach { (id, label) ->
                             FilterChip(type == id, { type = id }, { Text(label) })
@@ -128,7 +130,7 @@ fun NoteMenu(event: Event) {
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(mute, { mute = it })
-                        Text("Also mute ${core.displayName(event.pubkey)}")
+                        Text(str(R.string.also_mute_x, core.displayName(event.pubkey)))
                     }
                 }
             },
@@ -138,11 +140,11 @@ fun NoteMenu(event: Event) {
                     scope.act(nav) {
                         core.report(event, type)
                         if (mute) core.setMuted(event.pubkey, true)
-                        nav.say("Report sent")
+                        nav.say(str(R.string.report_sent))
                     }
-                }) { Text("Report") }
+                }) { Text(str(R.string.report)) }
             },
-            dismissButton = { TextButton({ reporting = false }) { Text("Cancel") } },
+            dismissButton = { TextButton({ reporting = false }) { Text(str(R.string.cancel)) } },
         )
     }
 }
@@ -157,7 +159,7 @@ fun BookmarksScreen() {
         onDispose { feed.stop() }
     }
     Column(Modifier.fillMaxSize()) {
-        BackBar("Bookmarks")
-        NoteList(feed, Modifier.weight(1f).padding(top = 8.dp), empty = "Notes you bookmark show up here.")
+        BackBar(str(R.string.bookmarks))
+        NoteList(feed, Modifier.weight(1f).padding(top = 8.dp), empty = str(R.string.notes_you_bookmark_show_up_here))
     }
 }

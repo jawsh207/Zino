@@ -6,6 +6,9 @@
  */
 package app.struthio.nostr.data
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
+import app.struthio.nostr.Texts
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -140,6 +143,12 @@ class Core(
     private val onSignedOut: (String) -> Unit = {},
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        // Normally set up as the app starts; tests make a Core without the app.
+        Texts.use(context)
+    }
+
     val store = Store(context, Accounts.databaseName(accountId))
     val secure = SecureStore(context, Accounts.secretsName(accountId))
     val prefs = context.getSharedPreferences(Accounts.settingsName(accountId), Context.MODE_PRIVATE)
@@ -609,7 +618,7 @@ class Core(
     /** Refuses to sign in as someone who already has their own account on this phone. */
     private fun checkNotAdded(pubkey: String) {
         if (accounts?.holding(pubkey, accountId) != null) {
-            throw UserError("That account is already on this phone. Switch to it in Settings.")
+            throw UserError(str(R.string.that_account_is_already_on_this))
         }
     }
 
@@ -632,9 +641,9 @@ class Core(
             try {
                 KeyBackup.decrypt(backup, password)
             } catch (_: OutOfMemoryError) {
-                throw UserError("This backup needs more memory than this phone can give it.")
+                throw UserError(str(R.string.this_backup_needs_more_memory_than))
             }
-        } ?: throw UserError("Wrong password, or the backup is damaged.")
+        } ?: throw UserError(str(R.string.wrong_password_or_the_backup_is))
         adoptSecret(secret)
     }
 
@@ -645,7 +654,7 @@ class Core(
             try {
                 KeyBackup.encrypt(secret, password)
             } catch (_: OutOfMemoryError) {
-                throw UserError("There wasn't enough memory for that. Close some apps and try again.")
+                throw UserError(str(R.string.there_wasn_t_enough_memory_for))
             }
         }
     }
@@ -666,14 +675,14 @@ class Core(
         val secret = when {
             entity is Entity.Secret -> entity.key
             Hex.isKey(text.lowercase()) -> Hex.decode(text.lowercase())
-            else -> throw UserError("That is not an nsec or npub.")
+            else -> throw UserError(str(R.string.that_is_not_an_nsec_or))
         }
         adoptSecret(secret)
     }
 
     /** Stores a private key safely and signs in with it. */
     private suspend fun adoptSecret(secret: ByteArray) {
-        if (!Keys.isValidSecret(secret)) throw UserError("That key is not valid.")
+        if (!Keys.isValidSecret(secret)) throw UserError(str(R.string.that_key_is_not_valid))
         checkNotAdded(Keys.publicKey(secret))
         secure.put(KEY_SECRET, secret)
         prefs.edit().remove("read_only_pubkey").apply()
@@ -700,7 +709,7 @@ class Core(
 
     /** NIP-46 from a `bunker://` link: connect with its secret, then ask which account it signs for. */
     suspend fun signInBunker(link: String) = withContext(Dispatchers.IO) {
-        val bunker = RemoteSigner.parseBunker(link) ?: throw UserError("That isn't a bunker:// link.")
+        val bunker = RemoteSigner.parseBunker(link) ?: throw UserError(str(R.string.that_isn_t_a_bunker_link))
         val clientKey = RemoteSigner.newClientKey()
         val session = RemoteSigner.Session(pool, clientKey, bunker.remote, bunker.relays, ::openAuthUrl)
         try {
@@ -709,7 +718,7 @@ class Core(
                 listOf(bunker.remote, bunker.secret.orEmpty(), RemoteSigner.PERMISSIONS, RemoteSigner.METADATA),
             )
             if (reply != "ack" && bunker.secret != null && reply != bunker.secret) {
-                throw UserError("The remote signer didn't accept the connection.")
+                throw UserError(str(R.string.the_remote_signer_didn_t_accept))
             }
             finishRemoteSignIn(session, clientKey, bunker.remote, bunker.relays)
         } finally {
@@ -740,7 +749,7 @@ class Core(
     private suspend fun finishRemoteSignIn(session: RemoteSigner.Session, clientKey: ByteArray, remote: String, relays: List<String>) {
         // The signer's own key isn't necessarily the account's: the NIP says to ask.
         val user = session.request("get_public_key", emptyList()).trim().lowercase()
-        if (!Hex.isKey(user)) throw UserError("The remote signer didn't say which account it signs for.")
+        if (!Hex.isKey(user)) throw UserError(str(R.string.the_remote_signer_didn_t_say))
         checkNotAdded(user)
         val moved = session.switchRelays() ?: relays
         secure.put(KEY_BUNKER, clientKey)
@@ -761,7 +770,7 @@ class Core(
      * all relays; returns how many relays took it.
      */
     suspend fun requestVanish(reason: String): Int = withContext(Dispatchers.IO) {
-        val active = signer.value ?: throw UserError("Sign in first.")
+        val active = signer.value ?: throw UserError(str(R.string.sign_in_first))
         val event = active.sign(Draft(author(), nowSeconds(), Kind.VANISH, listOf(listOf("relay", "ALL_RELAYS")), reason.trim()))
         val relays = LinkedHashSet<String>()
         relays += writeRelays()
@@ -902,7 +911,7 @@ class Core(
      * Leaving a screen can't stop a note that is already signed.
      */
     suspend fun publish(draft: Draft, extraRelays: Set<String> = emptySet()): Event {
-        val active = signer.value ?: throw UserError("Sign in first.")
+        val active = signer.value ?: throw UserError(str(R.string.sign_in_first))
         // Trying again after a failure sends the very same signed event. A relay that got the first
         // try after all keeps one copy, as events are matched by id; a newly signed one would be a duplicate.
         val key = "${draft.pubkey}|${draft.kind}|${draft.tags}|${draft.content}"
@@ -922,7 +931,7 @@ class Core(
             }
             if (!result.ok) {
                 unconfirmed[key] = event
-                throw UserError(result.message.takeIf { it.isNotBlank() } ?: "No relay accepted this.")
+                throw UserError(result.message.takeIf { it.isNotBlank() } ?: str(R.string.no_relay_accepted_this))
             }
             unconfirmed.remove(key)
             ingest(event, own.first())
@@ -942,7 +951,7 @@ class Core(
         if (show) ingest(event, relays.first())
         waiting.value = store.outgoingCount()
         AppLog.add("kept kind ${event.kind} to send later")
-        notices.tryEmit(WAITING_NOTICE)
+        notices.tryEmit(str(R.string.waiting_notice))
     }
 
     private val sendingWaiting = Mutex()
@@ -968,7 +977,7 @@ class Core(
             waiting.value = left
             if (sent > 0) {
                 AppLog.add("sent $sent waiting events")
-                if (left == 0) notices.tryEmit(SENT_NOTICE)
+                if (left == 0) notices.tryEmit(str(R.string.sent_notice))
             }
         } finally {
             sendingWaiting.unlock()
@@ -1004,7 +1013,7 @@ class Core(
     }
 
     /** Your public key, or a "Sign in first" error. */
-    private fun author(): String = me ?: throw UserError("Sign in first.")
+    private fun author(): String = me ?: throw UserError(str(R.string.sign_in_first))
 
     /** Relays to name with a mention of someone: where they post. */
     fun mentionRelays(pubkey: String): List<String> = relaysOf(pubkey)?.write.orEmpty().take(2)
@@ -1025,12 +1034,12 @@ class Core(
 
     /** Bookmarks stay private: the list is encrypted to ourselves, as NIP-51 provides. */
     suspend fun setBookmarked(event: Event, saved: Boolean) = followsLock.withLock {
-        val active = signer.value ?: throw UserError("Sign in first.")
+        val active = signer.value ?: throw UserError(str(R.string.sign_in_first))
         val me = active.pubkey
-        if (!latestFromRelays(me, Kind.BOOKMARKS)) throw UserError("Could not reach your relays. Try again.")
+        if (!latestFromRelays(me, Kind.BOOKMARKS)) throw UserError(str(R.string.could_not_reach_your_relays_try))
         val current = store.latest(me, Kind.BOOKMARKS)
         if (current != null && current.content.contains("?iv=")) {
-            throw UserError("Your bookmarks use an old format that Zino will not overwrite.")
+            throw UserError(str(R.string.your_bookmarks_use_an_old_format))
         }
         val items = ArrayList<List<String>>()
         if (current != null && current.content.isNotBlank()) {
@@ -1126,7 +1135,7 @@ class Core(
         val pubkey = author()
         latestFromRelays(pubkey, Kind.METADATA)
         if (store.latest(pubkey, Kind.METADATA) == null && !safeToStartList()) {
-            throw UserError("Your profile has not been found yet, so saving now could replace it. Run the account check in Settings.")
+            throw UserError(str(R.string.your_profile_has_not_been_found))
         }
         val current = store.latest(pubkey, Kind.METADATA)
         val o = runCatching { JSONObject(current?.content ?: "{}") }.getOrDefault(JSONObject())
@@ -1235,11 +1244,11 @@ class Core(
      */
     suspend fun setFollowing(pubkey: String, follow: Boolean) = followsLock.withLock {
         val me = author()
-        if (!latestFromRelays(me, Kind.FOLLOWS)) throw UserError("Could not reach your relays. Try again.")
+        if (!latestFromRelays(me, Kind.FOLLOWS)) throw UserError(str(R.string.could_not_reach_your_relays_try))
         val current = store.latest(me, Kind.FOLLOWS)
         if (current == null && !safeToStartList()) {
             // Publishing now would replace a list we simply failed to find.
-            throw UserError("Your follow list has not been found yet, so following now could replace it. Run the account check in Settings.")
+            throw UserError(str(R.string.your_follow_list_has_not_been))
         }
         val tags = current?.tags.orEmpty().filterNot { it.size >= 2 && it[0] == "p" && it[1] == pubkey }
         val next: Tags = if (follow) tags + listOf(listOf("p", pubkey)) else tags
@@ -1250,7 +1259,7 @@ class Core(
     /** Mutes or unmutes someone, starting from the newest mute list on your relays. */
     suspend fun setMuted(pubkey: String, mute: Boolean) {
         val me = author()
-        if (!latestFromRelays(me, Kind.MUTES)) throw UserError("Could not reach your relays. Try again.")
+        if (!latestFromRelays(me, Kind.MUTES)) throw UserError(str(R.string.could_not_reach_your_relays_try))
         val current = store.latest(me, Kind.MUTES)
         val tags = current?.tags.orEmpty().filterNot { it.size >= 2 && it[0] == "p" && it[1] == pubkey }
         publish(Draft(me, nowSeconds(), Kind.MUTES, if (mute) tags + listOf(listOf("p", pubkey)) else tags, current?.content ?: ""))
@@ -1320,16 +1329,16 @@ class Core(
         store.latest(pubkey, Kind.METADATA)?.let { return parseProfile(it) }
         pool.query((lookupRelays() + DEFAULT_RELAYS).toSet(), listOf(Filter(authors = listOf(pubkey), kinds = listOf(Kind.METADATA))), onEvent = ::ingest)
         delay(150)
-        return store.latest(pubkey, Kind.METADATA)?.let(::parseProfile) ?: throw UserError("Could not load that profile.")
+        return store.latest(pubkey, Kind.METADATA)?.let(::parseProfile) ?: throw UserError(str(R.string.could_not_load_that_profile))
     }
 
     /** NIP-57 for one recipient: returns the invoice to pay. */
     private suspend fun zapInvoice(recipient: String, target: Event?, msats: Long, comment: String): String {
         val profile = profileOf(recipient)
         val info = withContext(Dispatchers.IO) { lnurlInfo(profile) }
-            ?: throw UserError("${displayName(recipient)} has no Lightning address.")
-        if (info.nostrPubkey == null) throw UserError("${displayName(recipient)}'s Lightning address does not support zaps.")
-        if (msats < info.min || (info.max > 0 && msats > info.max)) throw UserError("That amount is outside what this address accepts.")
+            ?: throw UserError(str(R.string.x_has_no_lightning_address, displayName(recipient)))
+        if (info.nostrPubkey == null) throw UserError(str(R.string.x_s_lightning_address_does_not, displayName(recipient)))
+        if (msats < info.min || (info.max > 0 && msats > info.max)) throw UserError(str(R.string.that_amount_is_outside_what_this))
         val lnurl = Bech32Lnurl.encode(info.url)
         val receiptRelays = (readRelays() + relaysOf(recipient)?.read.orEmpty()).take(6)
         val tags = ArrayList<List<String>>()
@@ -1341,14 +1350,14 @@ class Core(
             tags += listOf("e", it.id)
             tags += listOf("k", it.kind.toString())
         }
-        val active = signer.value ?: throw UserError("Sign in first.")
+        val active = signer.value ?: throw UserError(str(R.string.sign_in_first))
         val request = active.sign(Draft(active.pubkey, nowSeconds(), Kind.ZAP_REQUEST, tags, comment))
         val separator = if (info.callback.contains('?')) '&' else '?'
         val url = info.callback + separator + "amount=$msats&nostr=" + URLEncoder.encode(request.toJson(), "UTF-8") + "&lnurl=$lnurl"
         val response = withContext(Dispatchers.IO) { Http.json(url) }
         val invoice = response.optString("pr").takeIf { it.isNotEmpty() }
-            ?: throw UserError(response.optString("reason").ifEmpty { "No invoice came back." })
-        if (bolt11Msats(invoice) != msats) throw UserError("The invoice amount does not match.")
+            ?: throw UserError(response.optString("reason").ifEmpty { str(R.string.no_invoice_came_back) })
+        if (bolt11Msats(invoice) != msats) throw UserError(str(R.string.the_invoice_amount_does_not_match))
         store.setProvider(recipient, info.nostrPubkey, nowSeconds())
         return invoice
     }
@@ -1397,7 +1406,7 @@ class Core(
                 val text = when {
                     rumor.kind == Kind.DM -> rumor.content
                     file?.type?.startsWith("image/") == true -> "Photo"
-                    else -> "File"
+                    else -> str(R.string.file)
                 }
                 val replyTo = rumor.tags.firstOrNull { it.size >= 2 && it[0] == "e" && Hex.isKey(it[1]) }?.get(1)
                 store.addDm(Dm(rumor.id, roomKey(roomOf(rumor)), rumor.pubkey, rumor.createdAt, text, file, replyTo))
@@ -1455,13 +1464,13 @@ class Core(
 
     /** Seals and sends one rumor to everyone in the room, and a copy to yourself. Returns what was sent. */
     private suspend fun deliver(room: Set<String>, kind: Int, extraTags: Tags, content: String): Draft {
-        val active = signer.value ?: throw UserError("Sign in first.")
+        val active = signer.value ?: throw UserError(str(R.string.sign_in_first))
         val others = room - active.pubkey
         val mine = dmRelays.value
-        if (mine.isEmpty()) throw UserError("Set up your message relays first.")
+        if (mine.isEmpty()) throw UserError(str(R.string.set_up_your_message_relays_first))
         val targets = others.associateWith { dmRelaysOf(it) }
         targets.entries.firstOrNull { it.value.isEmpty() }?.let {
-            throw UserError("${displayName(it.key)} has not set up private messages yet.")
+            throw UserError(str(R.string.x_has_not_set_up_private, displayName(it.key)))
         }
         val rumor = Draft(active.pubkey, nowSeconds(), kind, others.map { listOf("p", it) } + extraTags, content)
         val json = rumor.toJson()
@@ -1478,7 +1487,7 @@ class Core(
                 kept = true
             }
         }
-        if (others.isNotEmpty() && !delivered && !kept) throw UserError("The message could not be delivered.")
+        if (others.isNotEmpty() && !delivered && !kept) throw UserError(str(R.string.the_message_could_not_be_delivered))
         val ownCopy = wrapFor(json, active.pubkey, active)
         if (others.isEmpty()) {
             // A note to yourself has no one else to reach, so your own inbox has to take it.
@@ -1487,7 +1496,7 @@ class Core(
             if (!result.ok && result.retryable) {
                 keepForLater(ownCopy, mine.toSet(), show = false)
             } else if (!result.ok) {
-                throw UserError(result.message.takeIf { it.isNotBlank() } ?: "The message could not be delivered.")
+                throw UserError(result.message.takeIf { it.isNotBlank() } ?: str(R.string.the_message_could_not_be_delivered))
             }
         } else {
             scope.launch {
@@ -1547,7 +1556,7 @@ class Core(
     /** Downloads, checks and decrypts an attachment. The plaintext is never written to disk here. */
     suspend fun openFile(file: FileMessage): ByteArray = withContext(Dispatchers.IO) {
         val data = Http.bytes(file.url)
-        if (file.hash != null && Hex.encode(sha256(data)) != file.hash) throw UserError("The file failed its integrity check.")
+        if (file.hash != null && Hex.encode(sha256(data)) != file.hash) throw UserError(str(R.string.the_file_failed_its_integrity_check))
         FileCipher.decrypt(data, Hex.decode(file.key), Hex.decode(file.nonce))
     }
 
@@ -1669,7 +1678,7 @@ class Core(
      */
     suspend fun copyListsToPopularRelays(): String = withContext(Dispatchers.IO) {
         val pubkey = author()
-        if (signer.value is ReadOnlySigner) throw UserError("This account is read-only.")
+        if (signer.value is ReadOnlySigner) throw UserError(str(R.string.this_account_is_read_only))
         val own = writeRelays() + readRelays()
         val answered = pool.query(
             own + lookupRelays() + DEFAULT_RELAYS,
@@ -1678,17 +1687,17 @@ class Core(
             onEvent = ::ingest,
         )
         // Copying is only useful with the newest versions, and those are on the account's relays.
-        if (answered.none { it in own }) throw UserError("Could not reach your relays. Try again.")
+        if (answered.none { it in own }) throw UserError(str(R.string.could_not_reach_your_relays_try))
         delay(400)
         val lists = PUBLIC_LISTS.mapNotNull { store.latest(pubkey, it) }
-        if (lists.isEmpty()) throw UserError("No lists were found to copy.")
+        if (lists.isEmpty()) throw UserError(str(R.string.no_lists_were_found_to_copy))
         val targets = (lookupRelays() + DEFAULT_RELAYS).toSet()
         val reached = HashSet<String>()
         for (list in lists) {
             pool.publish(list, targets).filterValues { it.ok }.keys.let(reached::addAll)
         }
-        if (reached.isEmpty()) throw UserError("No relay accepted your lists.")
-        "Copied ${lists.size} lists to ${reached.size} of ${targets.size} relays"
+        if (reached.isEmpty()) throw UserError(str(R.string.no_relay_accepted_your_lists))
+        str(R.string.copied_x_lists_to_x_of, lists.size, reached.size, targets.size)
     }
 
     // Link previews
@@ -2041,7 +2050,7 @@ class Core(
 
     /** NIP-88: votes go to the relays the poll names, because that's where results are counted. */
     suspend fun vote(event: Event, poll: Poll, choices: List<String>) {
-        val active = signer.value ?: throw UserError("Sign in first.")
+        val active = signer.value ?: throw UserError(str(R.string.sign_in_first))
         val tags = listOf(listOf("e", event.id)) + choices.map { listOf("response", it) }
         val signed = active.sign(Draft(active.pubkey, nowSeconds(), Kind.POLL_VOTE, tags, ""))
         val relays = poll.relays.ifEmpty { writeRelays().toList() }.take(MAX_PUBLISH_RELAYS).toSet()
@@ -2052,7 +2061,7 @@ class Core(
                 keepForLater(signed, relays, show = true)
                 return@withContext
             }
-            if (!result.ok) throw UserError(result.message.takeIf { it.isNotBlank() } ?: "No relay accepted this vote.")
+            if (!result.ok) throw UserError(result.message.takeIf { it.isNotBlank() } ?: str(R.string.no_relay_accepted_this_vote))
             ingest(signed, relays.first())
         }
     }
@@ -2121,11 +2130,11 @@ class Core(
 
     /** What Zino uses a relay for, in words, for the relay screen. */
     fun relayUses(url: String): List<String> = buildList {
-        if (url in readRelays()) add("Reading your feed")
-        if (url in writeRelays()) add("Posting your notes")
-        if (url in dmRelays.value) add("Private messages")
-        if (url in searchRelays()) add("Search")
-        if (url in lookupRelays()) add("Profile lookup")
+        if (url in readRelays()) add(str(R.string.reading_your_feed))
+        if (url in writeRelays()) add(str(R.string.posting_your_notes))
+        if (url in dmRelays.value) add(str(R.string.private_messages))
+        if (url in searchRelays()) add(str(R.string.search))
+        if (url in lookupRelays()) add(str(R.string.profile_lookup))
     }
 
     /** Your search relays, or Zino's defaults. */
@@ -2146,8 +2155,6 @@ class Core(
         /** A new network gets a moment to settle before waiting events go out on it. */
         private const val OUTBOX_SETTLE_MS = 3_000L
         private const val CLOSE_DELAY_MS = 10_000L
-        const val WAITING_NOTICE = "No connection. It will be sent when you're back online."
-        const val SENT_NOTICE = "Sent everything that was waiting"
         private const val CACHE_EVENTS = 20_000
         private const val IMAGE_CACHE_BYTES = 80L * 1024 * 1024
         private const val RELAY_INFO_MS = 86_400_000L

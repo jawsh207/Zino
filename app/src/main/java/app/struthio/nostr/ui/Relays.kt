@@ -5,6 +5,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import app.struthio.nostr.core.parseContent
 import android.content.Intent
 import android.net.Uri
@@ -91,7 +93,7 @@ private fun summaryLine(s: RelayStats.Summary): String? {
     return listOfNotNull(
         "↓ ${formatBytes(s.down)}",
         "↑ ${formatBytes(s.up)}",
-        s.uptime?.let { "$it% up" },
+        s.uptime?.let { str(R.string.x_up, it) },
     ).joinToString(" · ")
 }
 
@@ -99,10 +101,10 @@ private fun summaryLine(s: RelayStats.Summary): String? {
  * How a relay is doing, in words: its response time, a sign-in note, or that it's not answering.
  */
 private fun statusText(ping: Long?, info: RelayInfo?): String = when {
-    ping == CHECKING -> "Checking…"
-    ping != null -> "$ping ms"
-    info?.authRequired == true -> "Answers after sign-in"
-    else -> "Not answering"
+    ping == CHECKING -> str(R.string.checking)
+    ping != null -> str(R.string.x_ms, ping)
+    info?.authRequired == true -> str(R.string.answers_after_sign_in)
+    else -> str(R.string.not_answering)
 }
 
 /** The colour of the dot beside a relay's status. */
@@ -140,7 +142,7 @@ private fun RelayRow(url: String, onRemove: () -> Unit) {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        IconButton(onRemove) { Icon(Icons.Rounded.Close, "Remove") }
+        IconButton(onRemove) { Icon(Icons.Rounded.Close, str(R.string.remove)) }
     }
 }
 
@@ -154,12 +156,12 @@ private fun AddRelay(onAdd: (String) -> Unit) {
         OutlinedButton({
             val url = normalizeRelay(input)
             if (url == null) {
-                nav.say("Relays start with wss://")
+                nav.say(str(R.string.relays_start_with_wss))
             } else {
                 onAdd(url)
                 input = ""
             }
-        }) { Text("Add") }
+        }) { Text(str(R.string.add)) }
     }
 }
 
@@ -182,7 +184,7 @@ private fun SaveButton(enabled: Boolean, saved: String, save: suspend () -> Unit
             }
         },
         enabled = enabled && !busy,
-    ) { Text("Save") }
+    ) { Text(str(R.string.save)) }
 }
 
 /** A list of relays of one kind that can be edited and saved. */
@@ -210,40 +212,40 @@ fun RelaysScreen() {
     }
     val search by produceState<List<String>?>(null) { value = withContext(Dispatchers.IO) { core.searchRelays().toList() } }
     Column(Modifier.fillMaxSize().imePadding()) {
-        BackBar("Relays")
+        BackBar(str(R.string.relays))
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = PageGutter, vertical = 8.dp).navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Section("General") {
-                Text("Your feed and the notes you post. Two to four works best.", style = MaterialTheme.typography.bodyMedium)
+            Section(str(R.string.general)) {
+                Text(str(R.string.your_feed_and_the_notes_you), style = MaterialTheme.typography.bodyMedium)
                 general.forEach { relay ->
                     Column {
                         RelayRow(relay.url) { general.remove(relay) }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(relay.read, { relay.read = !relay.read }, { Text("Read") })
-                            FilterChip(relay.write, { relay.write = !relay.write }, { Text("Write") })
+                            FilterChip(relay.read, { relay.read = !relay.read }, { Text(str(R.string.read)) })
+                            FilterChip(relay.write, { relay.write = !relay.write }, { Text(str(R.string.write)) })
                         }
                     }
                 }
                 AddRelay { url -> if (general.none { it.url == url }) general += EditRelay(url, true, true) }
-                SaveButton(general.any { it.write } && general.any { it.read }, "Relays saved") {
+                SaveButton(general.any { it.write } && general.any { it.read }, str(R.string.relays_saved)) {
                     core.saveRelays(RelayList(general.filter { it.read }.map { it.url }, general.filter { it.write }.map { it.url }))
                 }
             }
             RelayGroup(
-                "Messaging",
-                "Where encrypted messages to you arrive. One to three is plenty.",
+                str(R.string.messaging),
+                str(R.string.where_encrypted_messages_to_you_arrive),
                 dm.ifEmpty { Core.DEFAULT_DM_RELAYS },
-                "Messaging relays saved",
+                str(R.string.messaging_relays_saved),
                 core::saveDmRelays,
             )
-            search?.let { RelayGroup("Search", "Finds notes and people.", it, "Search relays saved", core::saveSearchRelays) }
+            search?.let { RelayGroup(str(R.string.search), str(R.string.finds_notes_and_people), it, str(R.string.search_relays_saved), core::saveSearchRelays) }
             RelayGroup(
-                "Profile lookup",
-                "Finds people's profiles and relay lists. Saved on this phone only.",
+                str(R.string.profile_lookup),
+                str(R.string.finds_people_s_profiles_and_relay),
                 core.lookupRelays(),
-                "Lookup relays saved",
+                str(R.string.lookup_relays_saved),
             ) { core.saveLookupRelays(it) }
         }
     }
@@ -262,7 +264,7 @@ private fun Fact(label: String, value: String) {
 private fun stated(value: Boolean?, yes: String, no: String) = when (value) {
     true -> yes
     false -> no
-    null -> "Not stated"
+    null -> str(R.string.not_stated)
 }
 
 /**
@@ -285,7 +287,7 @@ fun RelayInfoScreen(url: String) {
     }
     val host = url.removePrefix("wss://")
     Column(Modifier.fillMaxSize()) {
-        BackBar("Relay details")
+        BackBar(str(R.string.relay_details))
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = PageGutter, vertical = 8.dp).navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -307,16 +309,16 @@ fun RelayInfoScreen(url: String) {
                 info?.description?.let { Text(linkedText(remember(it) { parseContent(it) }, emptyMap()), style = MaterialTheme.typography.bodyMedium) }
             }
             if (uses.isNotEmpty()) {
-                Section("You use it for") { uses.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) } }
+                Section(str(R.string.you_use_it_for)) { uses.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) } }
             }
             val usage = remember(url, ping) { core.pool.usage(url) }
             if (usage != null && (usage.tries > 0 || usage.down > 0 || usage.up > 0)) {
-                Section("Last ${RelayStats.DAYS} days") {
-                    Fact("Downloaded", formatBytes(usage.down))
-                    Fact("Uploaded", formatBytes(usage.up))
-                    usage.uptime?.let { Fact("Uptime", "$it% · reached ${usage.reached} of ${usage.tries} tries") }
+                Section(str(R.string.last_x_days, RelayStats.DAYS)) {
+                    Fact(str(R.string.downloaded), formatBytes(usage.down))
+                    Fact(str(R.string.uploaded), formatBytes(usage.up))
+                    usage.uptime?.let { Fact(str(R.string.uptime), str(R.string.x_reached_x_of_x_tries, it, usage.reached, usage.tries)) }
                     Text(
-                        "Measured from Zino's own connections, so only while you use it.",
+                        str(R.string.measured_from_zino_s_own_connections),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -324,34 +326,34 @@ fun RelayInfoScreen(url: String) {
             }
             val problems = core.pool.problemsOf(url)
             if (problems.isNotEmpty()) {
-                Section("Recent problems") { problems.forEach { Text(it, style = MaterialTheme.typography.bodySmall) } }
+                Section(str(R.string.recent_problems)) { problems.forEach { Text(it, style = MaterialTheme.typography.bodySmall) } }
             }
             if (info == null) {
-                Section("Details") { Text("This relay doesn't share any details.", style = MaterialTheme.typography.bodyMedium) }
+                Section(str(R.string.details)) { Text(str(R.string.this_relay_doesn_t_share_any), style = MaterialTheme.typography.bodyMedium) }
                 return@Column
             }
-            Section("Cost and access") {
+            Section(str(R.string.cost_and_access)) {
                 val cost = when {
-                    info.paymentRequired == true -> "Payment required"
-                    info.fees.isNotEmpty() -> "Fees listed"
-                    info.paymentRequired == false -> "Free"
-                    else -> "No fee listed"
+                    info.paymentRequired == true -> str(R.string.payment_required)
+                    info.fees.isNotEmpty() -> str(R.string.fees_listed)
+                    info.paymentRequired == false -> str(R.string.free)
+                    else -> str(R.string.no_fee_listed)
                 }
-                Fact("Cost", cost)
+                Fact(str(R.string.cost), cost)
                 info.fees.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
                 Fact(
-                    "Sign-in",
+                    str(R.string.sign_in),
                     when {
-                        signedIn -> "Signed in"
-                        refused -> "Not working on this relay"
-                        else -> stated(info.authRequired, "Required", "Not required")
+                        signedIn -> str(R.string.signed_in)
+                        refused -> str(R.string.not_working_on_this_relay)
+                        else -> stated(info.authRequired, str(R.string.required), str(R.string.not_required))
                     },
                 )
-                Fact("Posting", stated(info.restrictedWrites, "Restricted", "Open"))
-                info.paymentsUrl?.let { link -> OutlinedButton({ open(link) }) { Text("Payment page") } }
+                Fact(str(R.string.posting), stated(info.restrictedWrites, str(R.string.restricted), str(R.string.open)))
+                info.paymentsUrl?.let { link -> OutlinedButton({ open(link) }) { Text(str(R.string.payment_page)) } }
             }
             if (info.nips.isNotEmpty()) {
-                Section("Features") {
+                Section(str(R.string.features)) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         info.nips.map(::nipName).distinct().forEach { name ->
                             Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
@@ -362,14 +364,14 @@ fun RelayInfoScreen(url: String) {
                 }
             }
             if (info.limits.isNotEmpty()) {
-                Section("Limits") { info.limits.forEach { (label, value) -> Fact(label, value) } }
+                Section(str(R.string.limits)) { info.limits.forEach { (label, value) -> Fact(label, value) } }
             }
-            Section("Details") {
-                info.software?.let { Fact("Software", listOfNotNull(it, info.version).joinToString(" ")) }
-                info.contact?.let { Fact("Contact", it) }
+            Section(str(R.string.details)) {
+                info.software?.let { Fact(str(R.string.software), listOfNotNull(it, info.version).joinToString(" ")) }
+                info.contact?.let { Fact(str(R.string.contact), it) }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    info.operator?.let { pubkey -> OutlinedButton({ nav.push(Screen.Profile(pubkey)) }) { Text("Operator") } }
-                    info.terms?.let { link -> OutlinedButton({ open(link) }) { Text("Terms") } }
+                    info.operator?.let { pubkey -> OutlinedButton({ nav.push(Screen.Profile(pubkey)) }) { Text(str(R.string.operator)) } }
+                    info.terms?.let { link -> OutlinedButton({ open(link) }) { Text(str(R.string.terms)) } }
                 }
             }
         }

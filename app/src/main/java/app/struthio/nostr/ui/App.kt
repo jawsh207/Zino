@@ -4,6 +4,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import android.Manifest
 import android.os.Build
 import androidx.activity.compose.BackHandler
@@ -139,10 +141,10 @@ class Nav(private val scope: CoroutineScope, private val snackbar: SnackbarHostS
 private class Tab(val label: String, val on: ImageVector, val off: ImageVector)
 
 private val TABS = listOf(
-    Tab("Home", Icons.Rounded.Home, Icons.Outlined.Home),
-    Tab("Messages", Icons.Rounded.ChatBubble, Icons.Outlined.ChatBubbleOutline),
-    Tab("Wallet", Icons.Rounded.AccountBalanceWallet, Icons.Outlined.AccountBalanceWallet),
-    Tab("Notifications", Icons.Rounded.Notifications, Icons.Outlined.NotificationsNone),
+    Tab(str(R.string.home), Icons.Rounded.Home, Icons.Outlined.Home),
+    Tab(str(R.string.messages), Icons.Rounded.ChatBubble, Icons.Outlined.ChatBubbleOutline),
+    Tab(str(R.string.wallet), Icons.Rounded.AccountBalanceWallet, Icons.Outlined.AccountBalanceWallet),
+    Tab(str(R.string.notifications), Icons.Rounded.Notifications, Icons.Outlined.NotificationsNone),
 )
 
 /**
@@ -173,7 +175,7 @@ fun App(core: Core, deepLink: MutableStateFlow<String?>) {
                 // Looked up outside this effect: clearing the link above restarts it, which would cancel the lookup.
                 is Entity.Address -> scope.launch {
                     core.fetchAddress(entity.kind, entity.author, entity.identifier, entity.relays)?.let { nav.push(Screen.Thread(it.id)) }
-                        ?: nav.say("Couldn't find that post")
+                        ?: nav.say(str(R.string.couldn_t_find_that_post))
                 }
                 else -> Unit
             }

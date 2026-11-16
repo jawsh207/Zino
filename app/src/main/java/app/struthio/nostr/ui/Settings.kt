@@ -6,6 +6,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -175,18 +177,18 @@ private fun AccountsGroup() {
                     app.switchTo(account.id)
                 },
                 headlineContent = { Text(account.name?.takeIf { it.isNotBlank() } ?: core.displayName(pubkey), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                supportingContent = { Text("Switch to this account") },
+                supportingContent = { Text(str(R.string.switch_to_this_account)) },
                 leadingContent = { Avatar(pubkey, 40.dp) },
             )
         }
         row
     } + listOf<@Composable (Shape) -> Unit>({ shape ->
-        SettingRow(shape, Icons.Rounded.PersonAdd, "Add account", "Sign in to another account on this phone") {
+        SettingRow(shape, Icons.Rounded.PersonAdd, str(R.string.add_account), str(R.string.sign_in_to_another_account_on)) {
             nav.stack.clear()
             app.addAccount()
         }
     })
-    Group("Accounts", *rows.toTypedArray())
+    Group(str(R.string.accounts), *rows.toTypedArray())
 }
 
 /** A settings row with a switch. */
@@ -197,10 +199,10 @@ private fun SwitchRow(shape: Shape, icon: ImageVector, title: String, summary: S
 
 /** How often checks run, in words. */
 private fun intervalLabel(minutes: Int) = when {
-    minutes == 0 -> "Off"
-    minutes < 60 -> "Every $minutes minutes"
-    minutes == 60 -> "Every hour"
-    else -> "Every ${minutes / 60} hours"
+    minutes == 0 -> str(R.string.off)
+    minutes < 60 -> str(R.string.every_x_minutes, minutes)
+    minutes == 60 -> str(R.string.every_hour)
+    else -> str(R.string.every_x_hours, minutes / 60)
 }
 
 /** The settings screen. */
@@ -227,7 +229,7 @@ fun SettingsScreen() {
     val version = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() }
 
     Column(Modifier.fillMaxSize()) {
-        BackBar("Settings")
+        BackBar(str(R.string.settings))
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = PageGutter).navigationBarsPadding(),
         ) {
@@ -241,35 +243,35 @@ fun SettingsScreen() {
                 trailingContent = {
                     IconButton({
                         context.copy(Nip19.npub(me))
-                        nav.say("Public key copied")
-                    }) { Icon(Icons.Rounded.ContentCopy, "Copy npub") }
+                        nav.say(str(R.string.public_key_copied))
+                    }) { Icon(Icons.Rounded.ContentCopy, str(R.string.copy_npub)) }
                 },
             )
             AccountsGroup()
             Group(
-                "Account",
-                { SettingRow(it, Icons.Rounded.Bookmarks, "Bookmarks") { nav.push(Screen.Bookmarks) } },
+                str(R.string.account),
+                { SettingRow(it, Icons.Rounded.Bookmarks, str(R.string.bookmarks)) { nav.push(Screen.Bookmarks) } },
                 if (hasKey) {
-                    { SettingRow(it, Icons.Rounded.Lock, "Encrypted key backup", "Export your key protected by a password") { sealing = true } }
+                    { SettingRow(it, Icons.Rounded.Lock, str(R.string.encrypted_key_backup), str(R.string.export_your_key_protected_by_a)) { sealing = true } }
                 } else {
                     null
                 },
                 if (hasKey) {
-                    { SettingRow(it, Icons.Rounded.Key, "Show private key", "For backing up by hand") { confirmReveal = true } }
+                    { SettingRow(it, Icons.Rounded.Key, str(R.string.show_private_key), str(R.string.for_backing_up_by_hand)) { confirmReveal = true } }
                 } else {
                     null
                 },
             )
             Group(
-                "Relays",
-                { SettingRow(it, Icons.Rounded.Hub, "Manage relays", "General, messaging, search and profile lookup") { nav.push(Screen.Relays) } },
-                { SettingRow(it, Icons.Rounded.FactCheck, "Account check", "See which relays have your profile and lists") { nav.push(Screen.AccountCheck) } },
+                str(R.string.relays),
+                { SettingRow(it, Icons.Rounded.Hub, str(R.string.manage_relays), str(R.string.general_messaging_search_and_profile_lookup)) { nav.push(Screen.Relays) } },
+                { SettingRow(it, Icons.Rounded.FactCheck, str(R.string.account_check), str(R.string.see_which_relays_have_your_profile)) { nav.push(Screen.AccountCheck) } },
                 {
                     SettingRow(
                         it,
                         Icons.Rounded.CloudUpload,
-                        if (copying) "Copying…" else "Copy lists to popular relays",
-                        "Helps other apps and people find you",
+                        if (copying) str(R.string.copying) else str(R.string.copy_lists_to_popular_relays),
+                        str(R.string.helps_other_apps_and_people_find),
                     ) {
                         if (!copying) {
                             copying = true
@@ -283,22 +285,22 @@ fun SettingsScreen() {
                         }
                     }
                 },
-                { SettingRow(it, Icons.Rounded.Storage, "Media servers", "Where images and files you send are stored") { editingServers = true } },
+                { SettingRow(it, Icons.Rounded.Storage, str(R.string.media_servers), str(R.string.where_images_and_files_you_send)) { editingServers = true } },
             )
             Group(
-                "Notifications",
-                { SettingRow(it, Icons.Rounded.Notifications, "Check for activity", intervalLabel(interval)) { pickingInterval = true } },
+                str(R.string.notifications),
+                { SettingRow(it, Icons.Rounded.Notifications, str(R.string.check_for_activity), intervalLabel(interval)) { pickingInterval = true } },
             )
             Group(
-                "Feeds",
+                str(R.string.feeds),
                 {
-                    SwitchRow(it, Icons.Rounded.Groups, "Trusted network", "Global and Trending show only people you follow and the people they follow", trustFilter) { on ->
+                    SwitchRow(it, Icons.Rounded.Groups, str(R.string.trusted_network), str(R.string.global_and_trending_show_only_people), trustFilter) { on ->
                         trustFilter = on
                         core.setTrustFilter(on)
                     }
                 },
                 {
-                    SwitchRow(it, Icons.Rounded.Link, "Link previews", "Shows a card for links. Each linked site can see your IP address", linkPreviews) { on ->
+                    SwitchRow(it, Icons.Rounded.Link, str(R.string.link_previews), str(R.string.shows_a_card_for_links_each), linkPreviews) { on ->
                         linkPreviews = on
                         core.setLinkPreviews(on)
                     }
@@ -307,8 +309,8 @@ fun SettingsScreen() {
                     SwitchRow(
                         it,
                         Icons.Rounded.SmartDisplay,
-                        "Embedded videos",
-                        "Plays YouTube, PeerTube, Invidious, Piped and similar videos in notes. Nothing loads until you tap play, then that site can see your IP address and what you watch",
+                        str(R.string.embedded_videos),
+                        str(R.string.plays_youtube_peertube_invidious_piped_and),
                         videoEmbeds,
                     ) { on ->
                         videoEmbeds = on
@@ -317,35 +319,35 @@ fun SettingsScreen() {
                 },
             )
             Group(
-                "Troubleshooting",
+                str(R.string.troubleshooting),
                 {
-                    SettingRow(it, Icons.Rounded.ContentCopy, "Copy logs", "Connections, sign-ins and errors. Leaves out your keys, network address and the text of notes and messages") {
+                    SettingRow(it, Icons.Rounded.ContentCopy, str(R.string.copy_logs), str(R.string.connections_sign_ins_and_errors_leaves)) {
                         scope.act(nav) {
                             val report = core.logReport()
                             withContext(Dispatchers.Main) { context.copy(report) }
-                            nav.say("Logs copied")
+                            nav.say(str(R.string.logs_copied))
                         }
                     }
                 },
                 {
-                    SettingRow(it, Icons.Rounded.DeleteSweep, "Clear logs") {
+                    SettingRow(it, Icons.Rounded.DeleteSweep, str(R.string.clear_logs)) {
                         AppLog.clear()
-                        nav.say("Logs cleared")
+                        nav.say(str(R.string.logs_cleared))
                     }
                 },
             )
             Spacer(Modifier.height(16.dp))
-            SettingRow(RoundedCornerShape(24.dp), Icons.AutoMirrored.Rounded.Logout, "Sign out", color = MaterialTheme.colorScheme.error) { confirmSignOut = true }
+            SettingRow(RoundedCornerShape(24.dp), Icons.AutoMirrored.Rounded.Logout, str(R.string.sign_out), color = MaterialTheme.colorScheme.error) { confirmSignOut = true }
             Spacer(Modifier.height(8.dp))
             SettingRow(
                 RoundedCornerShape(24.dp),
                 Icons.Rounded.DeleteForever,
-                "Delete account everywhere",
-                "Ask every relay to erase everything you've posted",
+                str(R.string.delete_account_everywhere_2),
+                str(R.string.ask_every_relay_to_erase_everything),
                 color = MaterialTheme.colorScheme.error,
             ) { vanishing = true }
             Text(
-                listOfNotNull("Zino", version).joinToString(" "),
+                listOfNotNull(str(R.string.zino), version).joinToString(" "),
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.labelMedium,
@@ -359,10 +361,10 @@ fun SettingsScreen() {
     if (pickingInterval) {
         AlertDialog(
             onDismissRequest = { pickingInterval = false },
-            title = { Text("Check for activity") },
+            title = { Text(str(R.string.check_for_activity)) },
             text = {
                 Column {
-                    Text("Android may delay checks while the phone is idle.", style = MaterialTheme.typography.bodyMedium)
+                    Text(str(R.string.android_may_delay_checks_while_the), style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(8.dp))
                     Notifier.INTERVALS.forEach { minutes ->
                         Row(
@@ -380,51 +382,51 @@ fun SettingsScreen() {
                     }
                 }
             },
-            confirmButton = { TextButton({ pickingInterval = false }) { Text("Close") } },
+            confirmButton = { TextButton({ pickingInterval = false }) { Text(str(R.string.close)) } },
         )
     }
     if (confirmReveal) {
         AlertDialog(
             onDismissRequest = { confirmReveal = false },
-            title = { Text("Show your private key?") },
-            text = { Text("Anyone who sees this key controls your account, and it cannot be changed or reset. Keep it somewhere private.") },
+            title = { Text(str(R.string.show_your_private_key)) },
+            text = { Text(str(R.string.anyone_who_sees_this_key_controls)) },
             confirmButton = {
                 TextButton({
                     confirmReveal = false
                     scope.act(nav) { revealed = core.exportSecret() }
-                }) { Text("Show key") }
+                }) { Text(str(R.string.show_key)) }
             },
-            dismissButton = { TextButton({ confirmReveal = false }) { Text("Cancel") } },
+            dismissButton = { TextButton({ confirmReveal = false }) { Text(str(R.string.cancel)) } },
         )
     }
     revealed?.let { key ->
         AlertDialog(
             onDismissRequest = { revealed = null },
-            title = { Text("Your private key") },
+            title = { Text(str(R.string.your_private_key)) },
             text = { SelectionContainer { Text(key, style = MaterialTheme.typography.bodySmall) } },
             confirmButton = {
                 TextButton({
                     context.copy(key)
-                    nav.say("Private key copied. Clear your clipboard after saving it.")
-                }) { Text("Copy") }
+                    nav.say(str(R.string.private_key_copied_clear_your_clipboard))
+                }) { Text(str(R.string.copy)) }
             },
-            dismissButton = { TextButton({ revealed = null }) { Text("Close") } },
+            dismissButton = { TextButton({ revealed = null }) { Text(str(R.string.close)) } },
         )
     }
     if (vanishing) VanishDialog { vanishing = false }
     if (confirmSignOut) {
         AlertDialog(
             onDismissRequest = { confirmSignOut = false },
-            title = { Text("Sign out?") },
-            text = { Text("This removes your key and messages from this device. Without a backup of your private key you cannot get this account back.") },
+            title = { Text(str(R.string.sign_out_2)) },
+            text = { Text(str(R.string.this_removes_your_key_and_messages)) },
             confirmButton = {
                 TextButton({
                     confirmSignOut = false
                     nav.stack.clear()
                     scope.act(nav) { core.signOut() }
-                }) { Text("Sign out", color = MaterialTheme.colorScheme.error) }
+                }) { Text(str(R.string.sign_out), color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton({ confirmSignOut = false }) { Text("Cancel") } },
+            dismissButton = { TextButton({ confirmSignOut = false }) { Text(str(R.string.cancel)) } },
         )
     }
 }
@@ -438,10 +440,10 @@ private fun MediaServersDialog(onClose: () -> Unit) {
     var servers by remember { mutableStateOf(core.mediaServers().joinToString("\n")) }
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text("Media servers") },
+        title = { Text(str(R.string.media_servers)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Images and files you send are stored here. One server per line.", style = MaterialTheme.typography.bodyMedium)
+                Text(str(R.string.images_and_files_you_send_are), style = MaterialTheme.typography.bodyMedium)
                 OutlinedTextField(servers, { servers = it }, modifier = Modifier.fillMaxWidth())
             }
         },
@@ -449,17 +451,17 @@ private fun MediaServersDialog(onClose: () -> Unit) {
             TextButton({
                 val list = servers.lines().map { it.trim().trimEnd('/') }.filter { it.startsWith("https://") }.distinct()
                 if (list.isEmpty()) {
-                    nav.say("Servers start with https://")
+                    nav.say(str(R.string.servers_start_with_https))
                 } else {
                     scope.act(nav) {
                         core.saveMediaServers(list)
-                        nav.say("Media servers saved")
+                        nav.say(str(R.string.media_servers_saved))
                         onClose()
                     }
                 }
-            }) { Text("Save") }
+            }) { Text(str(R.string.save)) }
         },
-        dismissButton = { TextButton(onClose) { Text("Cancel") } },
+        dismissButton = { TextButton(onClose) { Text(str(R.string.cancel)) } },
     )
 }
 
@@ -491,50 +493,50 @@ fun EditProfileScreen() {
     var addingAccount by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().imePadding()) {
-        BackBar("Edit profile")
+        BackBar(str(R.string.edit_profile))
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = PageGutter, vertical = 8.dp).navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-                OutlinedTextField(displayName, { displayName = it }, label = { Text("Display name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(name, { name = it }, label = { Text("Username") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(about, { about = it }, label = { Text("About") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(picture, { picture = it }, label = { Text("Picture URL") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(displayName, { displayName = it }, label = { Text(str(R.string.display_name)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(name, { name = it }, label = { Text(str(R.string.username)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(about, { about = it }, label = { Text(str(R.string.about)) }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(picture, { picture = it }, label = { Text(str(R.string.picture_url)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(
                     banner,
                     { banner = it },
-                    label = { Text("Banner URL") },
-                    supportingText = { Text("A wide picture across the top of your profile.") },
+                    label = { Text(str(R.string.banner_url)) },
+                    supportingText = { Text(str(R.string.a_wide_picture_across_the_top)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(website, { website = it }, label = { Text("Website") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(nip05, { nip05 = it }, label = { Text("Nostr address (NIP-05)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(lud16, { lud16 = it }, label = { Text("Lightning address") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(website, { website = it }, label = { Text(str(R.string.website)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(nip05, { nip05 = it }, label = { Text(str(R.string.nostr_address_nip_05)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(lud16, { lud16 = it }, label = { Text(str(R.string.lightning_address)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(
                     status,
                     { status = it },
-                    label = { Text("Status") },
-                    placeholder = { Text("What are you up to?") },
-                    supportingText = { Text("Shown under your name. Leave empty to clear it.") },
+                    label = { Text(str(R.string.status)) },
+                    placeholder = { Text(str(R.string.what_are_you_up_to)) },
+                    supportingText = { Text(str(R.string.shown_under_your_name_leave_empty)) },
                     singleLine = true,
                     enabled = loadedStatus != null,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text("Linked accounts", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+                Text(str(R.string.linked_accounts), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
                 if (loadedIdentities == null) {
-                    Text("Loading…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(str(R.string.loading), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     identities.forEach { identity ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text("${identity.label} · ${identity.name}", style = MaterialTheme.typography.bodyMedium)
+                                Text(str(R.string.x_x, identity.label, identity.name), style = MaterialTheme.typography.bodyMedium)
                                 Text(identity.proof, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                             }
-                            IconButton({ identities.remove(identity) }) { Icon(Icons.Rounded.Close, "Remove ${identity.label} account") }
+                            IconButton({ identities.remove(identity) }) { Icon(Icons.Rounded.Close, str(R.string.remove_x_account, identity.label)) }
                         }
                     }
-                    OutlinedButton({ addingAccount = true }) { Text("Link an account") }
+                    OutlinedButton({ addingAccount = true }) { Text(str(R.string.link_an_account)) }
                 }
                 Button(
                     onClick = {
@@ -549,7 +551,7 @@ fun EditProfileScreen() {
                                 )
                                 if (loadedStatus != null && status.trim() != loadedStatus) core.setStatus(status)
                                 if (loadedIdentities != null && identities.toList() != loadedIdentities) core.setIdentities(identities.toList())
-                                nav.say("Profile saved")
+                                nav.say(str(R.string.profile_saved))
                                 nav.pop()
                             } finally {
                                 saving = false
@@ -557,7 +559,7 @@ fun EditProfileScreen() {
                         }
                     },
                     enabled = !saving,
-                ) { Text(if (saving) "Saving…" else "Save profile") }
+                ) { Text(if (saving) str(R.string.saving) else str(R.string.save_profile)) }
         }
     }
     if (addingAccount) LinkAccountDialog(Nip19.npub(me), { identities += it }) { addingAccount = false }
@@ -575,23 +577,23 @@ private fun LinkAccountDialog(npub: String, onAdd: (Identity) -> Unit, onDismiss
     var proof by remember { mutableStateOf("") }
     var choosing by remember { mutableStateOf(false) }
     val proofHint = when (platform) {
-        "github" -> "Gist ID"
-        "twitter" -> "Post ID"
-        "mastodon" -> "Post ID"
-        "bluesky" -> "Post record key"
+        "github" -> str(R.string.gist_id)
+        "twitter" -> str(R.string.post_id)
+        "mastodon" -> str(R.string.post_id)
+        "bluesky" -> str(R.string.post_record_key)
         "telegram" -> "channel/message"
-        "discord" -> "server/channel/message IDs"
-        else -> "Proof"
+        "discord" -> str(R.string.server_channel_message_ids)
+        else -> str(R.string.proof)
     }
     val nameHint = when (platform) {
         "mastodon" -> "instance/@username"
-        "bluesky" -> "handle, like alice.bsky.social"
-        "telegram" -> "user ID"
-        else -> "Username"
+        "bluesky" -> str(R.string.handle_like_alice_bsky_social)
+        "telegram" -> str(R.string.user_id)
+        else -> str(R.string.username)
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Link an account") },
+        title = { Text(str(R.string.link_an_account)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box {
@@ -608,7 +610,7 @@ private fun LinkAccountDialog(npub: String, onAdd: (Identity) -> Unit, onDismiss
                 OutlinedTextField(name, { name = it }, label = { Text(nameHint) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(proof, { proof = it }, label = { Text(proofHint) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Text(
-                    "Post this from that account, then put the post's ID above:",
+                    str(R.string.post_this_from_that_account_then),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Surface(
@@ -618,7 +620,7 @@ private fun LinkAccountDialog(npub: String, onAdd: (Identity) -> Unit, onDismiss
                 ) {
                     Text(Identity.proofText(npub), modifier = Modifier.padding(10.dp), style = MaterialTheme.typography.bodySmall)
                 }
-                Text("Tap the text to copy it.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(str(R.string.tap_the_text_to_copy_it), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = {
@@ -629,9 +631,9 @@ private fun LinkAccountDialog(npub: String, onAdd: (Identity) -> Unit, onDismiss
                     onDismiss()
                 },
                 enabled = name.isNotBlank() && proof.isNotBlank(),
-            ) { Text("Add") }
+            ) { Text(str(R.string.add)) }
         },
-        dismissButton = { TextButton(onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onDismiss) { Text(str(R.string.cancel)) } },
     )
 }
 
@@ -643,10 +645,10 @@ fun AccountCheckScreen() {
     val context = LocalContext.current
     val report by produceState<String?>(null) { value = core.accountCheck() }
     Column(Modifier.fillMaxSize()) {
-        BackBar("Account check")
+        BackBar(str(R.string.account_check))
         val text = report
         if (text == null) {
-            Text("Asking your relays…", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(str(R.string.asking_your_relays), Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             Loading(Modifier.fillMaxWidth().padding(24.dp))
         } else {
             Column(
@@ -655,8 +657,8 @@ fun AccountCheckScreen() {
             ) {
                 FilledTonalButton({
                     context.copy(text)
-                    nav.say("Report copied")
-                }) { Text("Copy report") }
+                    nav.say(str(R.string.report_copied))
+                }) { Text(str(R.string.copy_report)) }
                 SelectionContainer { Text(text, style = MaterialTheme.typography.bodySmall) }
             }
         }
@@ -677,16 +679,16 @@ private fun KeyBackupDialog(onClose: () -> Unit) {
     val sealed = backup
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text("Encrypted key backup") },
+        title = { Text(str(R.string.encrypted_key_backup)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (sealed == null) {
-                    Text("Choose a strong password. Nobody can recover it for you, and without it this backup can't be opened.", style = MaterialTheme.typography.bodyMedium)
-                    OutlinedTextField(password, { password = it }, label = { Text("Password") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
-                    OutlinedTextField(repeat, { repeat = it }, label = { Text("Repeat password") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
-                    if (password.isNotEmpty() && password.length < 12) Text("Use at least 12 characters.", style = MaterialTheme.typography.bodySmall)
+                    Text(str(R.string.choose_a_strong_password_nobody_can), style = MaterialTheme.typography.bodyMedium)
+                    OutlinedTextField(password, { password = it }, label = { Text(str(R.string.password)) }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                    OutlinedTextField(repeat, { repeat = it }, label = { Text(str(R.string.repeat_password)) }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                    if (password.isNotEmpty() && password.length < 12) Text(str(R.string.use_at_least_12_characters), style = MaterialTheme.typography.bodySmall)
                 } else {
-                    Text("Keep this somewhere safe. Don't post it publicly, even though it's encrypted.", style = MaterialTheme.typography.bodyMedium)
+                    Text(str(R.string.keep_this_somewhere_safe_don_t), style = MaterialTheme.typography.bodyMedium)
                     SelectionContainer { Text(sealed, style = MaterialTheme.typography.bodySmall) }
                 }
             }
@@ -705,15 +707,15 @@ private fun KeyBackupDialog(onClose: () -> Unit) {
                         }
                     },
                     enabled = !busy && password.length >= 12 && password == repeat,
-                ) { Text(if (busy) "Encrypting…" else "Encrypt") }
+                ) { Text(if (busy) str(R.string.encrypting) else str(R.string.encrypt)) }
             } else {
                 TextButton({
                     context.copy(sealed)
-                    nav.say("Encrypted backup copied")
-                }) { Text("Copy") }
+                    nav.say(str(R.string.encrypted_backup_copied))
+                }) { Text(str(R.string.copy)) }
             }
         },
-        dismissButton = { TextButton(onClose) { Text("Close") } },
+        dismissButton = { TextButton(onClose) { Text(str(R.string.close)) } },
     )
 }
 
@@ -757,26 +759,26 @@ fun Onboarding(modifier: Modifier = Modifier) {
             TextButton({ app.cancelAdding(previous.id) }, enabled = !busy) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, null)
                 Spacer(Modifier.width(8.dp))
-                Text("Back to ${previous.name?.takeIf { it.isNotBlank() } ?: core.displayName(previous.pubkey!!)}")
+                Text(str(R.string.back_to_x, previous.name?.takeIf { it.isNotBlank() } ?: core.displayName(previous.pubkey!!)))
             }
         } else {
             Spacer(Modifier.height(32.dp))
         }
-        Text("Zino", style = MaterialTheme.typography.displayMedium)
-        Text("Fast, light Nostr.", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(str(R.string.zino), style = MaterialTheme.typography.displayMedium)
+        Text(str(R.string.fast_light_nostr), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(16.dp))
-        Section("New to Nostr") {
-            OutlinedTextField(name, { name = it }, label = { Text("Your name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Button({ run { core.createAccount(name.trim()) } }, enabled = name.isNotBlank() && !busy) { Text("Create account") }
+        Section(str(R.string.new_to_nostr)) {
+            OutlinedTextField(name, { name = it }, label = { Text(str(R.string.your_name)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Button({ run { core.createAccount(name.trim()) } }, enabled = name.isNotBlank() && !busy) { Text(str(R.string.create_account)) }
         }
-        Section("Already have a key") {
-            OutlinedTextField(key, { key = it }, label = { Text("nsec, ncryptsec, or npub to browse read-only") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Section(str(R.string.already_have_a_key)) {
+            OutlinedTextField(key, { key = it }, label = { Text(str(R.string.nsec_ncryptsec_or_npub_to_browse)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
             val encrypted = key.trim().startsWith("ncryptsec1")
             if (encrypted) {
                 OutlinedTextField(
                     password,
                     { password = it },
-                    label = { Text("Backup password") },
+                    label = { Text(str(R.string.backup_password)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
@@ -785,7 +787,7 @@ fun Onboarding(modifier: Modifier = Modifier) {
             FilledTonalButton(
                 { run { if (encrypted) core.signInEncrypted(key, password) else core.signIn(key) } },
                 enabled = key.isNotBlank() && !busy && (!encrypted || password.isNotEmpty()),
-            ) { Text("Sign in") }
+            ) { Text(str(R.string.sign_in_2)) }
             if (ExternalSigner.isInstalled(context)) {
                 OutlinedButton(
                     onClick = {
@@ -804,9 +806,9 @@ fun Onboarding(modifier: Modifier = Modifier) {
                         }
                     },
                     enabled = !busy,
-                ) { Text("Use a signer app") }
+                ) { Text(str(R.string.use_a_signer_app)) }
             }
-            OutlinedButton({ remoteSigning = true }, enabled = !busy) { Text("Use a remote signer (bunker)") }
+            OutlinedButton({ remoteSigning = true }, enabled = !busy) { Text(str(R.string.use_a_remote_signer_bunker)) }
         }
     }
     if (remoteSigning) RemoteSignInSheet { remoteSigning = false }
@@ -834,7 +836,7 @@ private fun RemoteSignInSheet(onDismiss: () -> Unit) {
     // Listens for a signer answering the link for as long as the sheet is open.
     LaunchedEffect(clientKey) {
         val ok = runCatching { core.signInNostrConnect(clientKey, secret, RemoteSigner.CONNECT_RELAYS, 10 * 60_000L) }
-        ok.exceptionOrNull()?.let { nav.say(it.message ?: "The remote signer couldn't connect.") }
+        ok.exceptionOrNull()?.let { nav.say(it.message ?: str(R.string.the_remote_signer_couldn_t_connect)) }
         if (ok.getOrNull() == true) onDismiss()
     }
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -842,13 +844,13 @@ private fun RemoteSignInSheet(onDismiss: () -> Unit) {
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp).imePadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Use a remote signer", style = MaterialTheme.typography.titleLarge)
+            Text(str(R.string.use_a_remote_signer), style = MaterialTheme.typography.titleLarge)
             Text(
-                "Your key stays in a signer like nsec.app or a bunker of your own. Zino asks it to sign over Nostr relays, encrypted.",
+                str(R.string.your_key_stays_in_a_signer),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedTextField(link, { link = it }, label = { Text("bunker:// link") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(link, { link = it }, label = { Text(str(R.string.bunker_link)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Button(
                 {
                     connecting = true
@@ -862,11 +864,11 @@ private fun RemoteSignInSheet(onDismiss: () -> Unit) {
                     }
                 },
                 enabled = link.trim().startsWith("bunker://") && !connecting,
-            ) { Text(if (connecting) "Connecting… approve it in your signer" else "Connect") }
+            ) { Text(if (connecting) str(R.string.connecting_approve_it_in_your_signer) else str(R.string.connect)) }
             HorizontalDivider(Modifier.padding(vertical = 4.dp))
-            Text("Or connect from your signer", style = MaterialTheme.typography.titleSmall)
+            Text(str(R.string.or_connect_from_your_signer), style = MaterialTheme.typography.titleSmall)
             Text(
-                "Scan this with your signer, or open it in a signer on this phone. Zino is waiting for it.",
+                str(R.string.scan_this_with_your_signer_or),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -874,12 +876,12 @@ private fun RemoteSignInSheet(onDismiss: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilledTonalButton({
                     context.copy(connectUri)
-                    nav.say("Link copied")
-                }) { Text("Copy link") }
+                    nav.say(str(R.string.link_copied))
+                }) { Text(str(R.string.copy_link)) }
                 OutlinedButton({
                     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(connectUri))) }
-                        .onFailure { nav.say("No signer on this phone opens these links") }
-                }) { Text("Open in signer") }
+                        .onFailure { nav.say(str(R.string.no_signer_on_this_phone_opens)) }
+                }) { Text(str(R.string.open_in_signer)) }
             }
             Spacer(Modifier.height(16.dp))
         }
@@ -901,21 +903,19 @@ private fun VanishDialog(onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = { if (!sending) onDismiss() },
         icon = { Icon(Icons.Rounded.DeleteForever, null, tint = MaterialTheme.colorScheme.error) },
-        title = { Text("Delete account everywhere?") },
+        title = { Text(str(R.string.delete_account_everywhere)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "This asks every relay to permanently erase your posts, profile, lists, reactions and the messages sent to you. " +
-                        "Relays that support it must delete everything and refuse it if it's sent again.",
+                    str(R.string.vanish_explained),
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
-                    "It can't be undone. Not every relay supports it, and anyone who saved a copy keeps it. " +
-                        "Zino signs out afterwards.",
+                    str(R.string.vanish_warning),
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                OutlinedTextField(reason, { reason = it }, label = { Text("Reason (optional)") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(typed, { typed = it }, label = { Text("Type DELETE to confirm") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(reason, { reason = it }, label = { Text(str(R.string.reason_optional)) }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(typed, { typed = it }, label = { Text(str(R.string.type_delete_to_confirm)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
             }
         },
         confirmButton = {
@@ -925,7 +925,7 @@ private fun VanishDialog(onDismiss: () -> Unit) {
                     scope.act(nav) {
                         try {
                             val taken = core.requestVanish(reason)
-                            nav.say(if (taken > 0) "Sent to $taken relays. Signing out." else "No relay took the request. Try again.")
+                            nav.say(if (taken > 0) str(R.string.sent_to_x_relays_signing_out, taken) else str(R.string.no_relay_took_the_request_try))
                             if (taken > 0) {
                                 nav.stack.clear()
                                 core.signOut()
@@ -937,8 +937,8 @@ private fun VanishDialog(onDismiss: () -> Unit) {
                     }
                 },
                 enabled = typed.trim() == "DELETE" && !sending,
-            ) { Text(if (sending) "Sending…" else "Delete everywhere", color = MaterialTheme.colorScheme.error) }
+            ) { Text(if (sending) str(R.string.sending) else str(R.string.delete_everywhere), color = MaterialTheme.colorScheme.error) }
         },
-        dismissButton = { TextButton(onDismiss, enabled = !sending) { Text("Cancel") } },
+        dismissButton = { TextButton(onDismiss, enabled = !sending) { Text(str(R.string.cancel)) } },
     )
 }

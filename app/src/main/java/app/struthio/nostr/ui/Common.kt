@@ -4,6 +4,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.SystemClock
@@ -108,10 +110,10 @@ fun CoroutineScope.act(nav: Nav, block: suspend () -> Unit) = launch(Dispatchers
         throw e
     } catch (e: UserError) {
         AppLog.add("action failed: ${e.message}")
-        nav.say(e.message ?: "Something went wrong.")
+        nav.say(e.message ?: str(R.string.something_went_wrong))
     } catch (e: Exception) {
         AppLog.add("action failed: $e")
-        nav.say(e.message ?: "Something went wrong.")
+        nav.say(e.message ?: str(R.string.something_went_wrong))
     }
 }
 
@@ -314,7 +316,7 @@ fun emojiImages(emoji: Map<String, String>): Map<String, InlineTextContent> = em
 fun UnreadHeader(title: String, hasUnread: Boolean, onMarkAll: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f).padding(vertical = 16.dp))
-        IconButton(onMarkAll, enabled = hasUnread) { Icon(Icons.Rounded.DoneAll, "Mark all as read") }
+        IconButton(onMarkAll, enabled = hasUnread) { Icon(Icons.Rounded.DoneAll, str(R.string.mark_all_as_read)) }
     }
 }
 

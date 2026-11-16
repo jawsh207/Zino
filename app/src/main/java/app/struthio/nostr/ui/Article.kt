@@ -4,6 +4,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -82,7 +84,7 @@ fun ArticleCard(event: Event, inQuote: Boolean = false) {
             )
         }
         Text(
-            "Article · ${minutesToRead(event.content)} min read",
+            str(R.string.article_x_min_read, minutesToRead(event.content)),
             modifier = Modifier.padding(top = 6.dp),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
@@ -109,7 +111,7 @@ fun ArticleBody(event: Event) {
         val published = info?.publishedAt ?: event.createdAt
         Text(
             DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(published * 1000)) +
-                " · ${minutesToRead(event.content)} min read",
+                " · " + str(R.string.x_min_read, minutesToRead(event.content)),
             modifier = Modifier.padding(top = 4.dp),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

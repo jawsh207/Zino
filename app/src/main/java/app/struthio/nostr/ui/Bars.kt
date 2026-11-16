@@ -3,6 +3,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -21,7 +23,7 @@ fun BackBar(title: String, actions: @Composable RowScope.() -> Unit = {}) {
         title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         navigationIcon = {
             IconButton(onClick = { nav.pop() }) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, str(R.string.back))
             }
         },
         actions = actions,

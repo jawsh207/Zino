@@ -4,6 +4,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.str
+import app.struthio.nostr.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
@@ -118,7 +120,7 @@ fun MessagesScreen() {
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            UnreadHeader("Messages", unread.isNotEmpty()) { core.readAllRooms(me) }
+            UnreadHeader(str(R.string.messages), unread.isNotEmpty()) { core.readAllRooms(me) }
             if (relays.isEmpty()) {
                 Surface(
                     shape = RoundedCornerShape(28.dp),
@@ -126,15 +128,15 @@ fun MessagesScreen() {
                     modifier = Modifier.fillMaxWidth().padding(horizontal = PageGutter),
                 ) {
                     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("Private messages need an inbox", style = MaterialTheme.typography.titleMedium)
-                        Text("This publishes which relays hold your encrypted messages, so people can reach you.", style = MaterialTheme.typography.bodyMedium)
-                        Button({ scope.act(nav) { core.setUpMessages() } }) { Text("Set up messages") }
+                        Text(str(R.string.private_messages_need_an_inbox), style = MaterialTheme.typography.titleMedium)
+                        Text(str(R.string.this_publishes_which_relays_hold_your), style = MaterialTheme.typography.bodyMedium)
+                        Button({ scope.act(nav) { core.setUpMessages() } }) { Text(str(R.string.set_up_messages)) }
                     }
                 }
             }
             if (rooms.isEmpty() && relays.isNotEmpty()) {
                 Text(
-                    "No conversations yet.",
+                    str(R.string.no_conversations_yet),
                     modifier = Modifier.padding(horizontal = 16.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -150,7 +152,7 @@ fun MessagesScreen() {
             onClick = { nav.push(Screen.NewMessage) },
             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
             containerColor = MaterialTheme.colorScheme.primaryContainer,
-        ) { Icon(Icons.Rounded.Add, "New message") }
+        ) { Icon(Icons.Rounded.Add, str(R.string.new_message)) }
     }
 }
 
@@ -167,16 +169,16 @@ fun NewMessageScreen() {
         nav.push(Screen.Chat(roomKey(setOf(pubkey, me))))
     }
     Column(Modifier.fillMaxSize().imePadding()) {
-        BackBar("New message")
+        BackBar(str(R.string.new_message))
         OutlinedTextField(
             query,
             { query = it },
-            placeholder = { Text("Name, NIP-05 address or npub") },
+            placeholder = { Text(str(R.string.name_nip_05_address_or_npub)) },
             leadingIcon = { Icon(Icons.Rounded.Search, null) },
             trailingIcon = {
                 ScanButton { scanned ->
                     val entity = Nip19.decode(scanned.removePrefix("nostr:")) as? Entity.Profile
-                    if (entity != null) start(entity.pubkey) else nav.say("That is not a profile code.")
+                    if (entity != null) start(entity.pubkey) else nav.say(str(R.string.that_is_not_a_profile_code))
                 }
             },
             singleLine = true,
@@ -200,7 +202,7 @@ private fun RoomRow(room: Room, unread: Int, shape: Shape, onClick: () -> Unit) 
     CardRow(shape, onClick,
         headlineContent = {
             Text(
-                room.members.joinToString(", ") { core.displayName(it) }.ifEmpty { "Note to self" },
+                room.members.joinToString(", ") { core.displayName(it) }.ifEmpty { str(R.string.note_to_self) },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 fontWeight = if (unread > 0) FontWeight.Bold else null,
@@ -273,7 +275,7 @@ fun ChatScreen(room: String) {
             scope.act(nav) {
                 val data = core.openFile(file)
                 context.contentResolver.openOutputStream(uri)?.use { it.write(data) }
-                nav.say("File saved")
+                nav.say(str(R.string.file_saved))
             }
         }
     }
@@ -314,7 +316,7 @@ fun ChatScreen(room: String) {
             replyTo?.let { target ->
                 Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     ReplyQuote(target, Modifier.weight(1f))
-                    IconButton({ replyTo = null }) { Icon(Icons.Rounded.Close, "Cancel reply") }
+                    IconButton({ replyTo = null }) { Icon(Icons.Rounded.Close, str(R.string.cancel_reply)) }
                 }
             }
             Row(
@@ -322,13 +324,13 @@ fun ChatScreen(room: String) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                IconButton({ menu = true }, enabled = !sending) { Icon(Icons.Rounded.Add, "Attach") }
+                IconButton({ menu = true }, enabled = !sending) { Icon(Icons.Rounded.Add, str(R.string.attach)) }
                 DropdownMenu(menu, { menu = false }) {
-                    DropdownMenuItem(text = { Text("Photo") }, onClick = {
+                    DropdownMenuItem(text = { Text(str(R.string.photo)) }, onClick = {
                         menu = false
                         pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                     })
-                    DropdownMenuItem(text = { Text("File") }, onClick = {
+                    DropdownMenuItem(text = { Text(str(R.string.file)) }, onClick = {
                         menu = false
                         pickFile.launch(arrayOf("*/*"))
                     })
@@ -336,7 +338,7 @@ fun ChatScreen(room: String) {
                 OutlinedTextField(
                     text,
                     { text = it },
-                    placeholder = { Text(if (sending) "Sending…" else "Message") },
+                    placeholder = { Text(if (sending) str(R.string.sending) else str(R.string.message)) },
                     shape = RoundedCornerShape(24.dp),
                     maxLines = 4,
                     modifier = Modifier.weight(1f),
@@ -355,7 +357,7 @@ fun ChatScreen(room: String) {
                         }
                     },
                     enabled = text.isNotBlank() && !sending,
-                ) { Icon(Icons.AutoMirrored.Rounded.Send, "Send") }
+                ) { Icon(Icons.AutoMirrored.Rounded.Send, str(R.string.send)) }
             }
           }
         }
@@ -367,7 +369,7 @@ fun ChatScreen(room: String) {
             onReact = { emoji -> acting = null; react(dm, emoji) },
             onMore = { acting = null; picking = dm },
             onReply = { acting = null; replyTo = dm },
-            onCopy = if (dm.file == null) ({ acting = null; clipboard.setText(AnnotatedString(dm.content)); nav.say("Copied") }) else null,
+            onCopy = if (dm.file == null) ({ acting = null; clipboard.setText(AnnotatedString(dm.content)); nav.say(str(R.string.copied)) }) else null,
         )
     }
     picking?.let { dm -> EmojiSheet(onPick = { picking = null; react(dm, it) }, onDismiss = { picking = null }) }
@@ -388,17 +390,17 @@ private fun MessageActions(dm: Dm, onDismiss: () -> Unit, onReact: (String) -> U
                 Box(
                     Modifier.size(46.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh).clickable(onClick = onMore),
                     contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Rounded.Add, "More reactions") }
+                ) { Icon(Icons.Rounded.Add, str(R.string.more_reactions)) }
             }
             ListItem(
-                headlineContent = { Text("Reply") },
+                headlineContent = { Text(str(R.string.reply)) },
                 leadingContent = { Icon(Icons.AutoMirrored.Rounded.Reply, null) },
                 modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable(onClick = onReply),
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             )
             onCopy?.let {
                 ListItem(
-                    headlineContent = { Text("Copy text") },
+                    headlineContent = { Text(str(R.string.copy_text)) },
                     leadingContent = { Icon(Icons.Rounded.ContentCopy, null) },
                     modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable(onClick = it),
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
@@ -427,13 +429,13 @@ private fun ReplyQuote(dm: Dm?, modifier: Modifier = Modifier, onClick: (() -> U
     ) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 7.dp)) {
             Text(
-                dm?.let { if (it.sender == core.me) "You" else core.displayName(it.sender) } ?: "Earlier message",
+                dm?.let { if (it.sender == core.me) str(R.string.you) else core.displayName(it.sender) } ?: str(R.string.earlier_message),
                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
                 color = colors.primary,
                 maxLines = 1,
             )
             Text(
-                dm?.content?.replace('\n', ' ') ?: "Not loaded",
+                dm?.content?.replace('\n', ' ') ?: str(R.string.not_loaded),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.onSurface,
                 maxLines = 2,
@@ -469,7 +471,7 @@ private fun Bubble(
                 .widthIn(max = 300.dp)
                 .clip(RoundedCornerShape(20.dp, 20.dp, if (mine) 6.dp else 20.dp, if (mine) 20.dp else 6.dp))
                 .background(if (mine) colors.primaryContainer else colors.surfaceBright)
-                .combinedClickable(onClick = {}, onLongClick = onLongPress, onLongClickLabel = "React or reply")
+                .combinedClickable(onClick = {}, onLongClick = onLongPress, onLongClickLabel = str(R.string.react_or_reply))
                 .padding(horizontal = 14.dp, vertical = 9.dp),
         ) {
             if (group && !mine) Text(core.displayName(dm.sender), style = MaterialTheme.typography.labelMedium, color = colors.primary)
@@ -497,7 +499,7 @@ private fun Bubble(
                 file.type.startsWith("image/") -> EncryptedImage(file)
                 else -> TextButton({ onSave(file) }) {
                     Icon(Icons.Rounded.AttachFile, null)
-                    Text("Save file")
+                    Text(str(R.string.save_file))
                 }
             }
         }
@@ -565,7 +567,7 @@ private fun EncryptedImage(file: FileMessage) {
         if (image == null) {
             Loading(Modifier.fillMaxSize())
         } else {
-            Image(image, "Photo", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Image(image, str(R.string.photo), Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
     }
 }
