@@ -76,14 +76,14 @@ class NegentropyPoolTest {
         val url = System.getenv("NEG_RELAY")
         assumeTrue("set NEG_RELAY to run", !url.isNullOrBlank())
         val author = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
-        val notes = Filter(authors = listOf(author), kinds = listOf(Kind.NOTE), since = 1_700_000_000, until = 1_710_000_000)
+        val notes = Filter(authors = listOf(author), kinds = listOf(Kind.NOTE), until = System.currentTimeMillis() / 1000 - 3600)
         val seen = HashMap<String, Long>()
-        pool.query(setOf(url!!), listOf(notes), 15_000) { e, _ -> synchronized(seen) { seen[e.id] = e.createdAt } }
-        println("fetched ${seen.size} notes from $url")
+        val answered = pool.query(setOf(url!!), listOf(notes), 15_000) { e, _ -> synchronized(seen) { seen[e.id] = e.createdAt } }
+        println("fetched ${seen.size} notes from $url (answered: $answered, problems: ${pool.problemsOf(url)})")
         assumeTrue("relay returned too few notes", seen.size >= 40)
         val kept = seen.entries.filterIndexed { i, _ -> i % 3 != 0 }.map { it.value to it.key }
         val missing = pool.missing(url, notes, kept, timeoutMs = 20_000)
-        println("relay says ${missing?.size} missing, expected at least ${seen.size - kept.size}")
+        println("relay says ${missing?.size} missing, expected at least ${seen.size - kept.size} (problems: ${pool.problemsOf(url)})")
         assertTrue("relay doesn't do negentropy", missing != null)
         val dropped = seen.keys - kept.map { it.second }.toSet()
         assertTrue("missing ids not reported", missing!!.containsAll(dropped))
