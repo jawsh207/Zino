@@ -146,6 +146,13 @@ jobs:
           for l in picked:
               if l not in seen:
                   seen.add(l); uniq.append(l)
+          # Failing tests: their names and the first lines of what went wrong.
+          import glob, xml.etree.ElementTree as ET
+          for f in glob.glob("app/build/test-results/**/*.xml", recursive=True):
+              for case in ET.parse(f).getroot().iter("testcase"):
+                  for bad in list(case.findall("failure")) + list(case.findall("error")):
+                      detail = (bad.get("message") or "") + "\n" + "\n".join((bad.text or "").splitlines()[:12])
+                      uniq.insert(0, f"TEST {case.get('classname')}.{case.get('name')}: {detail}")
           text = "\n".join(uniq)[:60000] or "\n".join(lines[-80:])
           chunks = [text[i:i + 6000] for i in range(0, len(text), 6000)][:10]
           for n, c in enumerate(chunks, 1):
