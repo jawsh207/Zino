@@ -48,6 +48,7 @@ Zino implements the current form of each specification and writes no deprecated 
 | 56 | Reports |
 | 57 | Zaps, including split tags and receipt validation |
 | 65 | Relay lists and the outbox model |
+| 77 | Negentropy: catching up on messages by comparing lists with relays |
 | 88 | Polls |
 | 92 | Media attachments |
 | B7 | Blossom uploads and media server lists |

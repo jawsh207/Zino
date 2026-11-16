@@ -194,7 +194,7 @@ class Core(
     private val wantedStats = LinkedHashSet<String>()
     private var statsJob: Job? = null
     private val statsFetched = HashMap<String, Long>()
-    private val sessionSubs = ArrayList<Subscription>()
+    private val sessionSubs = java.util.concurrent.CopyOnWriteArrayList<Subscription>()
     private val followsLock = Mutex()
     private val nip05Checked = HashSet<String>()
 
@@ -847,13 +847,40 @@ class Core(
 
     /**
      * Listens on your messaging relays for private messages, from just before the last one already
-     * read.
+     * read. Relays that can compare lists (NIP-77) send only the messages missing here; the rest
+     * send everything from that point, which repeats a few days of messages.
      */
     private fun startDmSubscription() {
         val pubkey = me ?: return
         val relays = dmRelays.value.toSet()
         if (relays.isEmpty()) return
         val since = prefs.getLong("dm_since", 0L).let { if (it == 0L) null else it - 3 * 86400 }
+        if (since == null) {
+            subscribeDms(pubkey, relays, null)
+            return
+        }
+        scope.launch {
+            val filter = Filter(kinds = listOf(Kind.GIFT_WRAP), tags = mapOf("p" to listOf(pubkey)), since = since)
+            val have = store.wrapsSince(since)
+            val compared = relays.map { url -> async { url to pool.missing(url, filter, have) } }.awaitAll()
+            val synced = compared.filter { it.second != null }.map { it.first }.toSet()
+            for ((url, ids) in compared) {
+                if (ids.isNullOrEmpty()) continue
+                AppLog.add("$url inbox compared: ${ids.size} messages missing")
+                // Fetched by id, in batches a relay will take in one filter.
+                for (batch in ids.chunked(100)) {
+                    pool.query(setOf(url), listOf(Filter(ids = batch)), 10_000) { wrap, _ -> scope.launch { receiveWrap(wrap) } }
+                }
+            }
+            if (synced.isNotEmpty()) AppLog.add("compared inboxes with ${synced.size} of ${relays.size} relays")
+            // Compared relays are already up to date: from them, only what arrives from now on.
+            if (synced.isNotEmpty()) subscribeDms(pubkey, synced, nowSeconds() - 60)
+            if (synced.size < relays.size) subscribeDms(pubkey, relays - synced, since)
+        }
+    }
+
+    /** Subscribes to gift wraps for [pubkey] on [relays], from [since] on. */
+    private fun subscribeDms(pubkey: String, relays: Set<String>, since: Long?) {
         val found = ConcurrentHashMap<String, AtomicInteger>()
         sessionSubs += pool.subscribe(
             relays,
@@ -1355,7 +1382,10 @@ class Core(
 
     /** Stores the message inside a gift wrap and returns its sender, when it can be opened. */
     internal suspend fun receiveWrap(wrap: Event): String? {
-        if (store.hasWrap(wrap.id)) return null
+        if (store.hasWrap(wrap.id)) {
+            store.addWrap(wrap.id, wrap.createdAt)
+            return null
+        }
         val active = signer.value ?: return null
         try {
             val seal = Event.parse(active.nip44Decrypt(wrap.content, wrap.pubkey)) ?: throw IllegalStateException()
@@ -1382,16 +1412,16 @@ class Core(
                 }
             }
             AppLog.add("opened a message")
-            store.addWrap(wrap.id)
+            store.addWrap(wrap.id, wrap.createdAt)
             prefs.edit().putLong("dm_since", maxOf(prefs.getLong("dm_since", 0L), wrap.createdAt)).apply()
             return rumor.pubkey
         } catch (e: IllegalStateException) {
             AppLog.add("could not open a message: ${e.message}")
             // A signer that needs approval leaves the wrap for later; anything else is unreadable.
-            if (active is LocalSigner) store.addWrap(wrap.id)
+            if (active is LocalSigner) store.addWrap(wrap.id, wrap.createdAt)
         } catch (e: Exception) {
             AppLog.add("could not open a message: ${e.javaClass.simpleName}")
-            if (active is LocalSigner) store.addWrap(wrap.id)
+            if (active is LocalSigner) store.addWrap(wrap.id, wrap.createdAt)
         }
         return null
     }

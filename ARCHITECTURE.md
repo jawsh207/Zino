@@ -47,7 +47,9 @@ Each account on the phone has its own database, settings and secrets files (`dat
 - **Failing relays rest.** A relay that keeps failing, refuses us or rate-limits us is left alone for a while, so a dead relay doesn't slow everything down. A failure while the phone has no network doesn't count against any relay.
 - **Reconnects** ask only for what's newer than what the relay already sent.
 - **Data use and uptime** per relay are counted in `net/RelayStats.kt` and shown on the relay screens.
-- **Not now or no?** When a post fails, `PublishResult.retryable` says whether trying later could help: no relay answered, or the answers were "rate-limited:" or "error:" (NIP-01). An outright refusal like "blocked:" is shown as an error instead.
+- **Not now or no?** When a post fails, `PublishResult.retryable` says whether trying later could help: no relay answered, the connection dropped, or the answers were "rate-limited:" or "error:" (NIP-01). An outright refusal like "blocked:" is shown as an error instead.
+
+- **Comparing lists (NIP-77).** `RelayPool.missing` runs negentropy (`core/Negentropy.kt`) with one relay: the two sides trade fingerprints of ranges of events until each knows what the other lacks, without sending the events. It returns the ids Zino is missing, or null if the relay doesn't support it, so the caller can fall back to a plain REQ.
 
 `net/WebSocket.kt` is Zino's own WebSocket client (TLS, handshake, frames), so no networking library is needed. The only libraries Zino uses beyond Compose are libsecp256k1, for keys and signatures, and ZXing, for QR codes.
 
@@ -66,7 +68,7 @@ Each account on the phone has its own database, settings and secrets files (`dat
 - `refs`: an index of tag values, for finding replies, reactions, zaps and votes
 - `zaps`: checked zap receipts
 - `dms`, `dm_reactions`: decrypted private messages and their reactions
-- `wraps`: which gift wraps were already opened
+- `wraps`: which gift wraps were already opened, and when they were made
 - `outbox`: signed events waiting for a connection
 - `reads`: what you've already seen, for unread markers
 
@@ -115,7 +117,9 @@ These use NIP-17, and the code is in `data/Core.kt` (`deliver`, `sendMessage`, `
 
 **Sending.** A message starts as an unsigned "rumor" (kind 14 for text, 15 for a file, 7 for a reaction). For each person in the chat, the rumor is sealed and gift-wrapped (NIP-59), encrypted with NIP-44, and sent to that person's messaging relays. You get a wrapped copy too, sent to your own messaging relays, so the message shows on your other devices.
 
-**Receiving.** Gift wraps addressed to you are opened once, then stored as plain messages on the phone. Each wrap's id is remembered so it's never opened twice.
+**Receiving.** Gift wraps addressed to you are opened once, then stored as plain messages on the phone. Each wrap's id and time are remembered, so it's never opened twice.
+
+**Catching up.** On start, Zino compares the wraps it has from the last few days with each messaging relay (NIP-77), fetches only the missing ones by id, then listens for new ones. Relays without NIP-77 are asked the old way, from a few days before the last message, which downloads some messages again.
 
 **Files** are encrypted before they're uploaded, and decrypted only in memory when shown.
 
@@ -182,4 +186,5 @@ Message notifications never say who sent the message or what it says.
   - `smoke.sh` walks through the main screens.
   - `kinds-check.sh` checks how the different post kinds are drawn.
   - `embed-check.sh` checks video embeds.
+  - The Negentropy check workflow compares a list of public notes with a real relay, to make sure Zino's NIP-77 matches what relays run.
 - **`docs-check.py`** runs on every push and fails the build if a file, class or function has no description. See [CONTRIBUTING.md](CONTRIBUTING.md).

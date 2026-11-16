@@ -102,9 +102,10 @@ private const val CREATE_DM_REACTIONS =
 
 /**
  * The database itself, one file per account. Version 5 added replies and reactions in private
- * messages; version 6 the outbox of events waiting to be sent.
+ * messages, version 6 the outbox of events waiting to be sent, and version 7 the time of each
+ * opened gift wrap, for comparing lists with relays (NIP-77).
  */
-class Store(context: Context, name: String = "struthio.db") : SQLiteOpenHelper(context, name, null, 6) {
+class Store(context: Context, name: String = "struthio.db") : SQLiteOpenHelper(context, name, null, 7) {
 
     /** Lets reading and writing happen at the same time. */
     override fun onConfigure(db: SQLiteDatabase) {
@@ -141,7 +142,7 @@ class Store(context: Context, name: String = "struthio.db") : SQLiteOpenHelper(c
         db.execSQL("CREATE INDEX dms_room ON dms(room, created_at DESC)")
         db.execSQL(CREATE_DM_REACTIONS)
         db.execSQL("CREATE INDEX dm_reactions_room ON dm_reactions(room)")
-        db.execSQL("CREATE TABLE wraps(id TEXT PRIMARY KEY)")
+        db.execSQL("CREATE TABLE wraps(id TEXT PRIMARY KEY, created_at INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE TABLE follows(pubkey TEXT PRIMARY KEY)")
         db.execSQL("CREATE TABLE trusted(pubkey TEXT PRIMARY KEY)")
         db.execSQL(CREATE_READS)
@@ -159,6 +160,8 @@ class Store(context: Context, name: String = "struthio.db") : SQLiteOpenHelper(c
             db.execSQL("CREATE INDEX dm_reactions_room ON dm_reactions(room)")
         }
         if (oldVersion < 6) db.execSQL(CREATE_OUTBOX)
+        // Wraps opened before this have no time, so the first comparison with a relay fetches them once more.
+        if (oldVersion < 7) db.execSQL("ALTER TABLE wraps ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0")
     }
 
     /** Stores a batch and returns what is new. */
@@ -551,9 +554,19 @@ class Store(context: Context, name: String = "struthio.db") : SQLiteOpenHelper(c
     fun hasWrap(id: String): Boolean =
         readableDatabase.rawQuery("SELECT 1 FROM wraps WHERE id=?", arrayOf(id)).use { it.moveToFirst() }
 
-    /** Remembers that a gift wrap was opened. */
-    fun addWrap(id: String) {
-        writableDatabase.execSQL("INSERT OR IGNORE INTO wraps(id) VALUES(?)", arrayOf(id))
+    /** Remembers that a gift wrap was opened, and its time; a time is filled in if it was missing. */
+    fun addWrap(id: String, createdAt: Long = 0) {
+        writableDatabase.execSQL("INSERT OR IGNORE INTO wraps(id, created_at) VALUES(?, ?)", arrayOf(id, createdAt))
+        if (createdAt > 0) writableDatabase.execSQL("UPDATE wraps SET created_at=? WHERE id=? AND created_at=0", arrayOf(createdAt, id))
+    }
+
+    /** The gift wraps opened from [since] on, as time and id, for comparing with a relay (NIP-77). */
+    fun wrapsSince(since: Long): List<Pair<Long, String>> {
+        val out = ArrayList<Pair<Long, String>>()
+        readableDatabase.rawQuery("SELECT created_at, id FROM wraps WHERE created_at >= ?", arrayOf(since.toString())).use {
+            while (it.moveToNext()) out += it.getLong(0) to it.getString(1)
+        }
+        return out
     }
 
     /** Stores a private message, keeping its reply link if one turns up later. */

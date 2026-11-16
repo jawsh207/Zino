@@ -1,0 +1,28 @@
+name: Negentropy check
+
+# Run by hand. Read-only: compares a list of public notes with a real relay (NIP-77). Nothing is published.
+on:
+  workflow_dispatch:
+    inputs:
+      relay:
+        description: Relay to compare with
+        required: false
+        default: wss://relay.damus.io
+
+jobs:
+  negentropy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v5
+      - shell: bash
+        env:
+          NEG_RELAY: ${{ inputs.relay }}
+        run: ./gradlew testDebugUnitTest --tests 'app.struthio.nostr.net.NegentropyPoolTest' -i 2>&1 | grep -E "fetched|missing|NegentropyPoolTest|FAILED|PASSED|SKIPPED|BUILD" 
+      - if: always()
+        run: cat app/build/test-results/testDebugUnitTest/*Negentropy*.xml | head -80

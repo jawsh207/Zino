@@ -10,6 +10,7 @@ import app.struthio.nostr.core.Draft
 import app.struthio.nostr.core.Event
 import app.struthio.nostr.core.Filter
 import app.struthio.nostr.core.Kind
+import app.struthio.nostr.core.Negentropy
 import app.struthio.nostr.core.Signer
 import app.struthio.nostr.core.nowSeconds
 import app.struthio.nostr.core.quoteJson
@@ -138,6 +139,39 @@ class RelayPool(
         return sub
     }
 
+    /**
+     * Finds the events matching [filter] that a relay has and [have] lacks, by comparing lists
+     * instead of downloading (NIP-77). [have] holds time and id pairs. Null when the relay doesn't
+     * do this, fails, or takes longer than [timeoutMs]: then ask with a plain REQ instead.
+     */
+    suspend fun missing(url: String, filter: Filter, have: Collection<Pair<Long, String>>, timeoutMs: Long = 8_000): Set<String>? {
+        val negentropy = Negentropy(have)
+        val id = "neg" + negCounter.incrementAndGet()
+        val relay = relay(url)
+        val done = CompletableDeferred<Set<String>?>()
+        relay.negOpen(id, "[\"NEG-OPEN\",${quoteJson(id)},${filter.toJson()},\"${negentropy.initiate()}\"]") { payload ->
+            if (payload == null) {
+                done.complete(null)
+                return@negOpen
+            }
+            val next = try {
+                negentropy.reconcile(payload)
+            } catch (e: IllegalArgumentException) {
+                note(url, "negentropy: ${e.message}")
+                done.complete(null)
+                return@negOpen
+            }
+            if (next == null) done.complete(negentropy.need.toSet()) else relay.negSend("[\"NEG-MSG\",${quoteJson(id)},\"$next\"]")
+        }
+        return try {
+            withTimeoutOrNull(timeoutMs) { done.await() }
+        } finally {
+            relay.negClose(id)
+        }
+    }
+
+    private val negCounter = java.util.concurrent.atomic.AtomicLong()
+
     /** Ends a subscription on all its relays. */
     fun close(sub: Subscription) {
         sub.relays.forEach { relays[it]?.remove(sub) }
@@ -257,7 +291,7 @@ class RelayPool(
                 AppLog.add("kind ${event.kind} not taken: ${each.joinToString("; ")}")
                 val silent = pending.values.any { !it.isCompleted }
                 // Worth another try later when some relay never answered, or every answer was "not now".
-                val later = silent || pending.values.all { PublishResult.meansLater(it.getCompleted().message) }
+                val later = silent || pending.values.all { it.getCompleted().let { r -> r.retryable || PublishResult.meansLater(r.message) } }
                 answer.complete(
                     PublishResult(
                         false,
@@ -382,6 +416,9 @@ class RelayPool(
         private val subs = LinkedHashMap<String, Subscription>()
         private val pending = LinkedHashMap<String, Pending>()
         private val counts = LinkedHashMap<String, Pair<String, (Long?) -> Unit>>()
+
+        /** Negentropy runs (NIP-77): the NEG-OPEN to send, and who hears each NEG-MSG, or null on failure. */
+        private val negs = LinkedHashMap<String, Pair<String, (String?) -> Unit>>()
         private var socket: WebSocket? = null
         private var open = false
         private var failures = 0
@@ -501,6 +538,38 @@ class RelayPool(
             if (send) write(request)
         }
 
+        /** Starts a negentropy run, sent once connected; a resting relay fails it at once. */
+        fun negOpen(id: String, request: String, onMessage: (String?) -> Unit) {
+            val send = synchronized(lock) {
+                if (cooling()) {
+                    null
+                } else {
+                    negs[id] = request to onMessage
+                    idleJob?.cancel()
+                    ensureConnected()
+                    open
+                }
+            }
+            when (send) {
+                null -> onMessage(null)
+                true -> write(request)
+                false -> Unit
+            }
+        }
+
+        /** Sends the next message of a negentropy run. */
+        fun negSend(text: String) = write(text)
+
+        /** Ends a negentropy run. */
+        fun negClose(id: String) {
+            val wasOpen = synchronized(lock) {
+                val had = negs.remove(id) != null
+                scheduleIdleClose()
+                had && open
+            }
+            if (wasOpen) write("[\"NEG-CLOSE\",${quoteJson(id)}]")
+        }
+
         /** Stops waiting for a count. */
         fun endCount(id: String) {
             synchronized(lock) {
@@ -565,12 +634,12 @@ class RelayPool(
 
         /** Closes the connection after a quiet spell when nothing needs it. */
         private fun scheduleIdleClose() {
-            if (subs.isNotEmpty() || pending.isNotEmpty() || counts.isNotEmpty()) return
+            if (subs.isNotEmpty() || pending.isNotEmpty() || counts.isNotEmpty() || negs.isNotEmpty()) return
             idleJob?.cancel()
             idleJob = scope.launch {
                 delay(IDLE_CLOSE_MS)
                 val ws = synchronized(lock) {
-                    if (subs.isEmpty() && pending.isEmpty() && counts.isEmpty()) socket else null
+                    if (subs.isEmpty() && pending.isEmpty() && counts.isEmpty() && negs.isEmpty()) socket else null
                 }
                 ws?.close()
             }
@@ -591,7 +660,8 @@ class RelayPool(
                 // answers aren't stored, so a request sent ahead of the listener loses its answer.
                 afterReqs += pending.values.map { "[\"EVENT\",${it.event.toJson()}]" }
                 pump()
-                counts.values.map { it.first }
+                // A run cut off by a reconnect starts over; each answer stands on its own, so nothing is lost.
+                counts.values.map { it.first } + negs.values.map { it.first }
             }
             requests.forEach { socket?.send(it) }
         }
@@ -624,9 +694,12 @@ class RelayPool(
             val current: List<Subscription>
             val retry: Boolean
             val waiting: List<(Long?) -> Unit>
+            val syncing: List<(String?) -> Unit>
             synchronized(lock) {
                 waiting = counts.values.map { it.second }
                 counts.clear()
+                syncing = negs.values.map { it.second }
+                negs.clear()
                 val now = System.currentTimeMillis()
                 // Only a connection that lasted counts as healthy. A relay that accepts and then
                 // drops us must back off, or every subscription gets resent every few seconds.
@@ -686,9 +759,11 @@ class RelayPool(
                     retryLater(maxOf(wait, limitedUntil - now))
                 }
             }
-            failed.forEach { it.result.complete(PublishResult(false, error?.message ?: "connection closed")) }
+            // A dropped connection is "not now": the post can go once the relay is back.
+            failed.forEach { it.result.complete(PublishResult(false, error?.message ?: "connection closed", retryable = true)) }
             if (!offline && !replaced) current.forEach { it.onDone(url, false) }
             waiting.forEach { it(null) }
+            syncing.forEach { it(null) }
         }
 
         /** Closes the connection and stops any retry. */
@@ -746,6 +821,11 @@ class RelayPool(
                     }
                     if (accept(event, url)) sub.onEvent(event, url)
                 }
+                "NEG-MSG" -> synchronized(lock) { negs[msg.optString(1)] }?.second?.invoke(msg.optString(2))
+                "NEG-ERR" -> {
+                    note(url, "negentropy: ${msg.optString(2)}")
+                    synchronized(lock) { negs.remove(msg.optString(1)) }?.second?.invoke(null)
+                }
                 "COUNT" -> {
                     val item = synchronized(lock) { counts.remove(msg.optString(1)) } ?: return
                     item.second(msg.optJSONObject(2)?.optLong("count"))
@@ -761,6 +841,10 @@ class RelayPool(
                     val id = msg.optString(1)
                     val reason = msg.optString(2)
                     synchronized(lock) { counts.remove(id) }?.let {
+                        it.second(null)
+                        return
+                    }
+                    synchronized(lock) { negs.remove(id) }?.let {
                         it.second(null)
                         return
                     }
