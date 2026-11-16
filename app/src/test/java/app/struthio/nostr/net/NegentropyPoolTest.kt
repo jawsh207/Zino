@@ -15,6 +15,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
+import java.security.cert.X509Certificate
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLSession
 import kotlin.random.Random
 
 /** The pool's NIP-77 runs: against a fake relay, and, when asked for, against a real one. */
@@ -26,6 +29,16 @@ class NegentropyPoolTest {
 
     @After
     fun tearDown() = scope.cancel()
+
+    /** The DNS names a server's certificate is for. */
+    private fun certificateNames(session: SSLSession): List<String> =
+        (session.peerCertificates.first() as X509Certificate).subjectAlternativeNames.orEmpty()
+            .filter { it[0] == 2 }.map { it[1] as String }
+
+    /** True if a certificate name covers [host], allowing one leading wildcard label. */
+    private fun matches(name: String, host: String): Boolean =
+        name.equals(host, ignoreCase = true) ||
+            (name.startsWith("*.") && host.substringAfter('.').equals(name.substring(2), ignoreCase = true))
 
     /** Made-up events: times and random ids. */
     private fun items(n: Int) = (1..n).map { 1_700_000_000L + it * 11 to Hex.encode(random.nextBytes(32)) }
@@ -75,6 +88,8 @@ class NegentropyPoolTest {
     fun aRealRelayAgrees() = runBlocking {
         val url = System.getenv("NEG_RELAY")
         assumeTrue("set NEG_RELAY to run", !url.isNullOrBlank())
+        // Off Android the JVM's default name check refuses every certificate; check names by hand.
+        HttpsURLConnection.setDefaultHostnameVerifier { host, session -> certificateNames(session).any { matches(it, host) } }
         val author = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
         val notes = Filter(authors = listOf(author), kinds = listOf(Kind.NOTE), until = System.currentTimeMillis() / 1000 - 3600)
         val seen = HashMap<String, Long>()
