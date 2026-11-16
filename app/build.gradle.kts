@@ -84,6 +84,11 @@ android {
 tasks.withType<Test>().configureEach {
     forkEvery = 1
     maxHeapSize = "2g"
+    // Failed tests print their name and cause in the build log, where CI can report them.
+    testLogging {
+        events("failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
