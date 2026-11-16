@@ -49,7 +49,7 @@ Each account on the phone has its own database, settings and secrets files (`dat
 - **Data use and uptime** per relay are counted in `net/RelayStats.kt` and shown on the relay screens.
 - **Not now or no?** When a post fails, `PublishResult.retryable` says whether trying later could help: no relay answered, the connection dropped, or the answers were "rate-limited:" or "error:" (NIP-01). An outright refusal like "blocked:" is shown as an error instead.
 
-- **Comparing lists (NIP-77).** `RelayPool.missing` runs negentropy (`core/Negentropy.kt`) with one relay: the two sides trade fingerprints of ranges of events until each knows what the other lacks, without sending the events. It returns the ids Zino is missing, or null if the relay doesn't support it, so the caller can fall back to a plain REQ.
+- **Comparing lists (NIP-77).** `RelayPool.missing` runs negentropy (`core/Negentropy.kt`) with one relay: the two sides trade fingerprints of ranges of events until each knows what the other lacks, without sending the events. It returns the ids Zino is missing, or null if the relay doesn't support it, so the caller can fall back to a plain REQ. Many relays run software that can do this but have it turned off; they answer with a notice, which ends the run at once. Notices from relays are kept in the relay's problem list.
 
 `net/WebSocket.kt` is Zino's own WebSocket client (TLS, handshake, frames), so no networking library is needed. The only libraries Zino uses beyond Compose are libsecp256k1, for keys and signatures, and ZXing, for QR codes.
 
@@ -194,5 +194,5 @@ Some text still comes in English from places that can't use Android resources: w
   - `smoke.sh` walks through the main screens.
   - `kinds-check.sh` checks how the different post kinds are drawn.
   - `embed-check.sh` checks video embeds.
-  - The Negentropy check workflow compares a list of public notes with a real relay, to make sure Zino's NIP-77 matches what relays run.
+  - The Negentropy check workflow compares a list of public notes with a real relay (relay.nostr.net by default), to make sure Zino's NIP-77 matches what relays run.
 - **`docs-check.py`** runs on every push and fails the build if a file, class or function has no description. See [CONTRIBUTING.md](CONTRIBUTING.md).
