@@ -7,7 +7,7 @@ on:
       relay:
         description: Relay to compare with
         required: false
-        default: wss://relay.damus.io
+        default: wss://relay.nostr.net
 
 jobs:
   negentropy:
