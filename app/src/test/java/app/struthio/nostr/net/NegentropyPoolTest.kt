@@ -72,6 +72,17 @@ class NegentropyPoolTest {
     }
 
     @Test
+    fun aNoticeAboutAnUnknownCommandGivesNullAtOnce() = runBlocking {
+        val relay = FakeRelay(onOther = { m, send ->
+            if (m.getString(0) == "NEG-OPEN") send("""["NOTICE","ERROR: bad msg: unknown cmd"]""")
+        })
+        val started = System.currentTimeMillis()
+        assertNull(pool.missing(relay.url, filter, items(3), timeoutMs = 5000))
+        assertTrue(System.currentTimeMillis() - started < 3000)
+        relay.close()
+    }
+
+    @Test
     fun aRefusalGivesNull() = runBlocking {
         val relay = FakeRelay(onOther = { m, send ->
             if (m.getString(0) == "NEG-OPEN") send("""["NEG-ERR","${m.getString(1)}","blocked: too many"]""")

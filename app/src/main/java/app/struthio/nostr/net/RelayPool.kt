@@ -822,6 +822,18 @@ class RelayPool(
                     if (accept(event, url)) sub.onEvent(event, url)
                 }
                 "NEG-MSG" -> synchronized(lock) { negs[msg.optString(1)] }?.second?.invoke(msg.optString(2))
+                "NOTICE" -> {
+                    val text = msg.optString(1)
+                    note(url, "notice: ${text.take(200)}")
+                    // Relays without NIP-77 answer NEG-OPEN with a notice about an unknown command,
+                    // not NEG-ERR. Give up on those runs now rather than waiting out the timeout.
+                    if (text.contains("NEG-", ignoreCase = true) || text.contains("negentropy", ignoreCase = true) ||
+                        text.contains("unknown cmd", ignoreCase = true)
+                    ) {
+                        val failed = synchronized(lock) { negs.values.map { it.second }.also { negs.clear() } }
+                        failed.forEach { it(null) }
+                    }
+                }
                 "NEG-ERR" -> {
                     note(url, "negentropy: ${msg.optString(2)}")
                     synchronized(lock) { negs.remove(msg.optString(1)) }?.second?.invoke(null)
