@@ -18,6 +18,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** Where a feed's posts come from. */
 sealed interface FeedSource {
@@ -90,18 +91,46 @@ class Feed(private val core: Core, private val source: FeedSource) {
         start()
     }
 
-    /** Fills the list from the database straight away, before any relay answers. */
+    /** The relays a relay-based feed reads from, which is also how its cached posts are found. */
+    private fun feedRelays(): Set<String> = when (source) {
+        FeedSource.MyRelays -> core.readRelays() + core.writeRelays()
+        else -> Core.DEFAULT_RELAYS.toSet()
+    }
+
+    /** Stored posts for this feed from before [until], for the cache-first part of loading. */
+    private fun cached(until: Long): List<Event> = when (source) {
+        FeedSource.Following -> core.store.followingFeed(PAGE, until)
+        is FeedSource.Author -> core.store.authorNotes(source.pubkey, PAGE, until)
+        FeedSource.Global, FeedSource.MyRelays -> core.store.relayFeed(feedRelays(), PAGE, until)
+        else -> emptyList()
+    }
+
+    /**
+     * Fills the list from the database straight away, before any relay answers. Posts already
+     * showing stay, so coming back to a feed never blanks it.
+     */
     private fun preload() {
-        val now = nowSeconds() + 60
+        if (source == FeedSource.Trending) {
+            preloadTrending()
+            return
+        }
         val cached = when (source) {
-            FeedSource.Following -> core.store.followingFeed(PAGE, now)
-            is FeedSource.Author -> core.store.authorNotes(source.pubkey, PAGE, now)
             is FeedSource.Search -> core.store.searchNotes(source.query, PAGE)
             FeedSource.Bookmarks -> core.bookmarks.value.mapNotNull(core.store::event)
-            else -> emptyList()
+            else -> cached(nowSeconds() + 60)
         }
         cached.forEach { add(it) }
         flush()
+    }
+
+    /** Shows the last trending list worked out, until the new one is ready. */
+    private fun preloadTrending() {
+        if (notes.value.isNotEmpty()) return
+        val ids = core.prefs.getString(TRENDING_KEY, null)?.split(',')?.filter(String::isNotBlank).orEmpty()
+        if (ids.isEmpty()) return
+        val rank = ids.withIndex().associate { it.value to it.index }
+        val muted = core.muted.value
+        notes.value = core.store.eventsById(ids).filter { it.pubkey !in muted }.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
     }
 
     /** The relay filter for this feed: its kinds, plus the authors, hashtag or search it needs. */
@@ -128,16 +157,27 @@ class Feed(private val core: Core, private val source: FeedSource) {
                 relays.associateWith { setOf(s.pubkey) }
             }
             FeedSource.MyRelays -> (core.readRelays() + core.writeRelays()).associateWith { emptySet() }
-            else -> Core.DEFAULT_RELAYS.associateWith { emptySet() }
+            else -> feedRelays().associateWith { emptySet() }
         }
+        val waiting = java.util.concurrent.atomic.AtomicInteger(0)
         for ((relay, authors) in coverage) {
             if (source == FeedSource.Following && authors.isEmpty()) continue
             val groups = if (authors.isEmpty()) listOf(null) else authors.chunked(Core.MAX_AUTHORS)
             for (group in groups) {
-                subs += core.pool.subscribe(setOf(relay), listOf(filterFor(group, newest?.minus(3600))), onEvent = ::receive)
+                waiting.incrementAndGet()
+                subs += core.pool.subscribe(
+                    setOf(relay),
+                    listOf(filterFor(group, newest?.minus(3600))),
+                    onDone = { _, _ -> waiting.decrementAndGet() },
+                    onEvent = ::receive,
+                )
             }
         }
-        delay(2500)
+        // "Nothing here yet" only once the relays have had their say: stop waiting when posts are
+        // showing, when every relay has sent what it had, or after a while for slow ones.
+        withTimeoutOrNull(FIRST_ANSWER_MS) {
+            while (waiting.get() > 0 && synchronized(byId) { byId.isEmpty() }) delay(200)
+        }
     }
 
     /** Takes a post from a relay: stores it, then shows it if it belongs in this feed. */
@@ -193,11 +233,7 @@ class Feed(private val core: Core, private val source: FeedSource) {
         val oldest = notes.value.lastOrNull()?.createdAt ?: return
         moreRunning = true
         core.scope.launch {
-            val cached = when (source) {
-                FeedSource.Following -> core.store.followingFeed(PAGE, oldest)
-                is FeedSource.Author -> core.store.authorNotes(source.pubkey, PAGE, oldest)
-                else -> emptyList()
-            }
+            val cached = cached(oldest)
             cached.forEach { add(it) }
             flush()
             if (cached.size < PAGE / 2) {
@@ -236,9 +272,12 @@ class Feed(private val core: Core, private val source: FeedSource) {
         }
         val rank = top.withIndex().associate { it.value to it.index }
         val muted = core.muted.value
-        notes.value = synchronized(found) {
+        val list = synchronized(found) {
             found.distinctBy { it.id }.filter { it.pubkey !in muted && (trusted == null || it.pubkey in trusted) }.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
         }
+        notes.value = list
+        // Kept for next time, so Trending opens with something while the new list is worked out.
+        core.prefs.edit().putString(TRENDING_KEY, list.joinToString(",") { it.id }).apply()
     }
 
     /** Fetches any bookmarked posts not yet stored, then shows them all. */
@@ -263,5 +302,7 @@ class Feed(private val core: Core, private val source: FeedSource) {
 
     private companion object {
         const val PAGE = 50
+        const val FIRST_ANSWER_MS = 10_000L
+        const val TRENDING_KEY = "trending_ids"
     }
 }

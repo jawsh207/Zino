@@ -186,6 +186,13 @@ class Core(
     val myRelays = MutableStateFlow(RelayList(DEFAULT_RELAYS, DEFAULT_RELAYS))
     val dmRelays = MutableStateFlow<List<String>>(emptyList())
 
+    /**
+     * The Home tab's feeds by tab, kept for as long as the account is open. Android drops a tab's
+     * screen when you move to another tab; keeping the feeds here means coming back shows the same
+     * posts instead of loading from scratch.
+     */
+    val homeFeeds = HashMap<Int, Feed>()
+
     /** How many signed events are waiting for a connection to be sent. */
     val waiting = MutableStateFlow(0)
 

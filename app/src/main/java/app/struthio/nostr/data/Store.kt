@@ -336,6 +336,26 @@ class Store(context: Context, name: String = "struthio.db") : SQLiteOpenHelper(c
     )
 
     /**
+     * Top-level posts first seen on any of [relays], newest first, before [until]: what the Global
+     * and Relays feeds show from the cache before their relays answer.
+     */
+    fun relayFeed(relays: Collection<String>, limit: Int, until: Long): List<Event> {
+        if (relays.isEmpty()) return emptyList()
+        val marks = relays.joinToString(",") { "?" }
+        return events(
+            """SELECT $COLUMNS FROM events WHERE kind IN ($POST_KINDS) AND root IS NULL AND created_at < ?
+               AND relay IN ($marks) ORDER BY created_at DESC LIMIT ?""",
+            (listOf(until.toString()) + relays + limit.toString()).toTypedArray(),
+        )
+    }
+
+    /** Stored events with these ids, in no particular order. */
+    fun eventsById(ids: Collection<String>): List<Event> {
+        if (ids.isEmpty()) return emptyList()
+        return events("SELECT $COLUMNS FROM events WHERE id IN (${ids.joinToString(",") { "?" }})", ids.toTypedArray())
+    }
+
+    /**
      * Everything a person posted: notes, comments, articles, media and boosts, newest first, before
      * [until].
      */

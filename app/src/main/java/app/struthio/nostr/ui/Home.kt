@@ -94,7 +94,7 @@ fun HomeScreen() {
         if (sessionLoaded && follows.isEmpty() && !picked) selected = 1
         if (follows.isNotEmpty() && !picked) selected = 0
     }
-    val feeds = remember { HashMap<Int, Feed>() }
+    val feeds = core.homeFeeds
     val feed = feeds.getOrPut(selected) { Feed(core, SOURCES[selected].second) }
     DisposableEffect(feed) {
         feed.start()

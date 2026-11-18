@@ -81,9 +81,11 @@ Secrets, like your private key and wallet link, are not in the database. `data/S
 `data/Feed.kt` runs one scrolling list of posts. Each kind of feed (Following, Trending, Global, your relays, a profile, a hashtag, search, bookmarks) decides which relays to ask and what to keep.
 
 A feed:
-1. shows what's stored straight away,
+1. shows what's stored straight away: Following from the people you follow, Global and Relays from the posts first seen on those relays, Trending from the last list it worked out,
 2. asks relays for anything newer and keeps listening,
 3. loads older posts as you near the end of the list.
+
+A feed says "Nothing here yet" only after its relays have answered (or 10 seconds have passed), not while they're still loading. The Home tab's feeds are kept in `Core.homeFeeds`, so switching tabs and coming back shows the same posts.
 
 New posts that arrive while you're scrolled down wait behind the "new posts" pill in `ui/Home.kt`.
 
