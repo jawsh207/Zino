@@ -786,11 +786,19 @@ class Store(context: Context, name: String = "struthio.db") : SQLiteOpenHelper(c
         val freePages = db.rawQuery("PRAGMA freelist_count", null).use { if (it.moveToFirst()) it.getLong(0) else 0L }
         if (freePages * pageSize < minFree) return 0
         val file = java.io.File(db.path)
-        val before = file.length()
+        val log = java.io.File(db.path + "-wal")
+        // Recent writes may still sit in the write-ahead log; fold them in first so sizes compare fairly.
+        checkpoint(db)
+        val before = file.length() + log.length()
         db.execSQL("VACUUM")
-        // The rebuild passes through the write-ahead log; empty it so that space comes back too.
+        // The rebuild passes through the log too; empty it so that space comes back as well.
+        checkpoint(db)
+        return (before - file.length() - log.length()).coerceAtLeast(0)
+    }
+
+    /** Moves everything in the write-ahead log into the database file and empties the log. */
+    private fun checkpoint(db: SQLiteDatabase) {
         db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }
-        return (before - file.length()).coerceAtLeast(0)
     }
 
     /** Deletes everything stored, as on signing out. */
