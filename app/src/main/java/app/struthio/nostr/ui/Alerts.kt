@@ -41,7 +41,7 @@ fun AlertsScreen() {
     val core = LocalCore.current
     val nav = LocalNav.current
     val me = core.me ?: return
-    val alerts by liveQuery(emptyList<Alert>()) { core.store.alerts(me, core.muted.value, 150) }
+    val alerts by liveQuery(emptyList<Alert>()) { core.visibleAlerts(me, 150) }
     val unread by liveQuery(emptySet<String>(), me) { core.unreadAlerts(me) }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {

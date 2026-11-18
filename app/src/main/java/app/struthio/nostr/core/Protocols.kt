@@ -161,17 +161,18 @@ fun prepareContent(text: String): Pair<String, Tags> {
 
 private val IMAGE_EXT = Regex(""".*\.(jpe?g|png|webp|gif|avif)(\?.*)?$""", RegexOption.IGNORE_CASE)
 
-/** An image or video address, with its shape if the post gives one. */
-data class Media(val url: String, val aspect: Float?)
+/** An image or video address, with its shape and blurred preview (blurhash) if the post gives them. */
+data class Media(val url: String, val aspect: Float?, val blurhash: String? = null)
 
 /** Images in a note: NIP-92 imeta first, then URLs that look like images. */
 fun noteImages(event: Event): List<Media> {
-    val meta = HashMap<String, Pair<String?, Float?>>()
+    val meta = HashMap<String, Triple<String?, Float?, String?>>()
     for (tag in event.tags) {
         if (tag.isEmpty() || tag[0] != "imeta") continue
         var url: String? = null
         var mime: String? = null
         var aspect: Float? = null
+        var blurhash: String? = null
         for (entry in tag.drop(1)) {
             val at = entry.indexOf(' ')
             if (at < 0) continue
@@ -179,20 +180,21 @@ fun noteImages(event: Event): List<Media> {
             when (entry.substring(0, at)) {
                 "url" -> url = value
                 "m" -> mime = value
+                "blurhash" -> blurhash = value.trim().takeIf { it.isNotEmpty() }
                 "dim" -> {
                     val (w, h) = value.split('x').map { it.toFloatOrNull() }.let { it.getOrNull(0) to it.getOrNull(1) }
                     if (w != null && h != null && h > 0f) aspect = w / h
                 }
             }
         }
-        url?.let { meta[it] = mime to aspect }
+        url?.let { meta[it] = Triple(mime, aspect, blurhash) }
     }
     return parseContent(event.content).filterIsInstance<Part.Link>().mapNotNull { link ->
         val info = meta[link.url]
         when {
-            info?.first?.startsWith("image/") == true -> Media(link.url, info.second)
+            info?.first?.startsWith("image/") == true -> Media(link.url, info.second, info.third)
             info?.first != null -> null
-            IMAGE_EXT.matches(link.url) -> Media(link.url, info?.second)
+            IMAGE_EXT.matches(link.url) -> Media(link.url, info?.second, info?.third)
             else -> null
         }
     }.distinct()

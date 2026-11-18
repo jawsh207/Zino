@@ -199,4 +199,15 @@ class StoreTest {
         assertNull(store.event(ancient.id))
         assertNull(store.event(stranger.id))
     }
+
+    @Test
+    fun compactingGivesSpaceBackAfterACleanup() {
+        val text = "x".repeat(2000)
+        insert(*(1..600).map { event(bob, Kind.NOTE, it.toLong(), "$text $it") }.toTypedArray())
+        assertEquals(0L, store.compactIfWasteful(minFree = Long.MAX_VALUE))
+        store.clearAll()
+        assertTrue(store.compactIfWasteful(minFree = 1) > 0)
+        // Nothing left to give back the second time.
+        assertEquals(0L, store.compactIfWasteful(minFree = 1))
+    }
 }

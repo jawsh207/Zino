@@ -93,6 +93,9 @@ sealed interface Screen {
     data object EditProfile : Screen
     /** Your bookmarks. */
     data object Bookmarks : Screen
+
+    /** Muted words and hashtags. */
+    data object Mutes : Screen
 }
 
 /** Whether the screen this sits in is the one being looked at. Hidden screens stop playing media. */
@@ -271,6 +274,7 @@ fun App(core: Core, deepLink: MutableStateFlow<String?>) {
                                 Screen.AccountCheck -> AccountCheckScreen()
                                 Screen.EditProfile -> EditProfileScreen()
                                 Screen.Bookmarks -> BookmarksScreen()
+                                Screen.Mutes -> MutesScreen()
                             }
                         }
                       }

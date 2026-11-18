@@ -139,7 +139,9 @@ fun ThreadScreen(screen: Screen.Thread) {
             core.store.thread(id, core.store.event(id)?.takeIf { Kind.isAddressable(it.kind) }?.let(::addressOf))
         }.orEmpty()
     }
-    val notes = remember(events, rootId) { rootId?.let { ordered(events, it) }.orEmpty() }
+    // Replies by muted people, or with muted words or hashtags, are left out; the post you opened stays.
+    val shown = remember(events, rootId, screen.id) { events.filter { it.id == rootId || it.id == screen.id || !core.hides(it) } }
+    val notes = remember(shown, rootId) { rootId?.let { ordered(shown, it) }.orEmpty() }
     val draft = remember { NoteDraft() }
     var sending by remember { mutableStateOf(false) }
     val attached = remember { mutableStateListOf<Upload>() }

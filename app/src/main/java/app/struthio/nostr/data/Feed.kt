@@ -129,8 +129,7 @@ class Feed(private val core: Core, private val source: FeedSource) {
         val ids = core.prefs.getString(TRENDING_KEY, null)?.split(',')?.filter(String::isNotBlank).orEmpty()
         if (ids.isEmpty()) return
         val rank = ids.withIndex().associate { it.value to it.index }
-        val muted = core.muted.value
-        notes.value = core.store.eventsById(ids).filter { it.pubkey !in muted }.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
+        notes.value = core.store.eventsById(ids).filterNot(core::hides).sortedBy { rank[it.id] ?: Int.MAX_VALUE }
     }
 
     /** The relay filter for this feed: its kinds, plus the authors, hashtag or search it needs. */
@@ -194,7 +193,7 @@ class Feed(private val core: Core, private val source: FeedSource) {
      * an older copy of something newer.
      */
     private fun add(event: Event) {
-        if (event.pubkey in core.muted.value) return
+        if (core.hides(event)) return
         if (event.isExpired()) return
         val keepsReplies = source is FeedSource.Author || source is FeedSource.Search || source == FeedSource.Bookmarks
         if (!keepsReplies && threadRef(event).root != null) return
@@ -271,9 +270,8 @@ class Feed(private val core: Core, private val source: FeedSource) {
             synchronized(found) { found += e }
         }
         val rank = top.withIndex().associate { it.value to it.index }
-        val muted = core.muted.value
         val list = synchronized(found) {
-            found.distinctBy { it.id }.filter { it.pubkey !in muted && (trusted == null || it.pubkey in trusted) }.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
+            found.distinctBy { it.id }.filter { !core.hides(it) && (trusted == null || it.pubkey in trusted) }.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
         }
         notes.value = list
         // Kept for next time, so Trending opens with something while the new list is worked out.

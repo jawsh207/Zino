@@ -37,7 +37,7 @@ fun pictures(event: Event): List<Media> = imetas(event).mapNotNull { meta ->
     val url = meta.one("url")?.takeIf { it.startsWith("https://") } ?: return@mapNotNull null
     val mime = meta.one("m")?.lowercase()
     if (mime != null && mime !in PICTURE_TYPES) return@mapNotNull null
-    Media(url, aspectOf(meta.one("dim")))
+    Media(url, aspectOf(meta.one("dim")), meta.one("blurhash"))
 }
 
 private val PICTURE_TYPES = setOf("image/apng", "image/avif", "image/gif", "image/jpeg", "image/png", "image/webp")

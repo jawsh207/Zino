@@ -35,7 +35,7 @@ Each account on the phone has its own database, settings and secrets files (`dat
 - **Switching.** `ZinoApp.switchTo` closes the current `Core` (its relays, subscriptions and network watch) and opens a new one on the other account's files. The activity draws the app inside `key(core)`, so every screen starts fresh for the new account.
 - **Adding** creates an empty account and switches to it, which shows sign-in. Sign-in can go back to the previous account, and the same person can't be added twice.
 - **Signing out** clears that account. If there are others, it's removed and another one takes over. Its files are deleted a little later, once the closed `Core` has let go of them.
-- **Notifications** are checked for the account in use.
+- **Notifications** are checked for every signed-in account (see Notifications below).
 
 ## Relays
 
@@ -123,7 +123,7 @@ These use NIP-17, and the code is in `data/Core.kt` (`deliver`, `sendMessage`, `
 
 **Receiving.** Gift wraps addressed to you are opened once, then stored as plain messages on the phone. Each wrap's id and time are remembered, so it's never opened twice.
 
-**Catching up.** On start, Zino compares the wraps it has from the last few days with each messaging relay (NIP-77), fetches only the missing ones by id, then listens for new ones. Relays without NIP-77 are asked the old way, from a few days before the last message, which downloads some messages again.
+**Catching up.** On start, Zino compares the wraps it has from the last few days with each messaging relay (NIP-77), fetches only the missing ones by id, then listens for new ones. Notifications catch up the same way over two weeks, through the same helper (`Core.compareAndFetch`). Relays without NIP-77 are asked the old way, from a few days before the last message, which downloads some messages again.
 
 **Files** are encrypted before they're uploaded, and decrypted only in memory when shown.
 
@@ -159,9 +159,18 @@ Zino uses no push service. `data/Notifier.kt` asks Android's JobScheduler to run
 
 Message notifications never say who sent the message or what it says.
 
+**Every account.** `ZinoApp.checkAllAccounts` runs the check for the account in use and, side by side, for each other signed-in account through a short-lived `Core` of its own, closed afterwards. Each account has its own summary and message notifications, so one can't replace another's. With more than one account, each notification names its account, and tapping one switches to that account first (`Notifier.EXTRA_ACCOUNT`).
+
+**Shrinking the database.** At most once a week, a background check runs `Store.compactIfWasteful`. If cleanups have left 8 MB or more of empty space inside the database file, it rebuilds the file (VACUUM) so the phone gets that space back. It runs in the background because the rebuild would slow the app down while it's open.
+
+## Muting
+
+The mute list (NIP-51, kind 10000) can hold people (`p`), words (`word`) and hashtags (`t`), in public tags or in its encrypted private part. `Core.applyMutes` reads all three. `Core.hides` says whether a post is hidden: by a muted person, by a muted hashtag in its tags or text, or by a muted word. Words match whole words, ignoring case, so muting "art" doesn't hide "start". Feeds, Trending, threads (except the post you opened) and notifications all leave hidden posts out. `ui/Mutes.kt` adds and removes words and hashtags; changes go on the public part of the newest mute list from your relays, keeping everything else on it.
+
 ## Media
 
 - **Uploads.** `data/Media.kt` uploads to Blossom servers (NIP-B7). Photos are turned upright and re-encoded first, which removes location and other hidden details.
+- **Blurred previews.** Posts can include a blurhash for each picture in its imeta tag (NIP-92). `core/Blurhash.kt` paints it as a tiny picture, which `NetImage` stretches over the picture's space until the real one has loaded.
 - **Downloads.** Pictures are fetched with `net/Http.kt`. They're cached on disk, and decoded pictures are kept in memory (`Images` in `ui/Common.kt`).
 
 ## Text and languages
@@ -187,6 +196,7 @@ Some text still comes in English from places that can't use Android resources: w
 | Notifications | `ui/Alerts.kt` |
 | Relays and relay details | `ui/Relays.kt` |
 | Settings, accounts, profile editing, sign-in | `ui/Settings.kt` |
+| Muted words and hashtags | `ui/Mutes.kt` |
 | QR scanning and codes | `ui/Qr.kt` |
 | Theme, fonts, colours | `ui/Theme.kt` |
 | Shared pieces (avatars, images, rows, times) | `ui/Common.kt`, `ui/Bars.kt` |

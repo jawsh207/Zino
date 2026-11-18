@@ -458,4 +458,10 @@
     <string name="view_picture">View picture</string>
     <!-- Spoken by screen readers for tapping a profile banner. -->
     <string name="view_banner">View banner</string>
+    <!-- Muted words and hashtags screen. -->
+    <string name="muted_words_and_hashtags">Muted words and hashtags</string>
+    <string name="muted_words_summary">Hide posts that mention them</string>
+    <string name="muted_words_explained">Posts, replies and notifications with these words or hashtags are hidden. Start with # to mute a hashtag.</string>
+    <string name="add_a_word_or_hashtag">A word or #hashtag</string>
+    <string name="nothing_muted_yet">No muted words or hashtags yet.</string>
 </resources>

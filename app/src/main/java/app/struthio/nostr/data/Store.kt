@@ -580,6 +580,22 @@ class Store(context: Context, name: String = "struthio.db") : SQLiteOpenHelper(c
         if (createdAt > 0) writableDatabase.execSQL("UPDATE wraps SET created_at=? WHERE id=? AND created_at=0", arrayOf(createdAt, id))
     }
 
+    /**
+     * Stored events of [kinds] that tag [pubkey], from [since] on, as time and id: what the
+     * notifications filter matches here, for comparing with a relay (NIP-77).
+     */
+    fun taggedSince(pubkey: String, kinds: Collection<Int>, since: Long): List<Pair<Long, String>> {
+        val out = ArrayList<Pair<Long, String>>()
+        readableDatabase.rawQuery(
+            """SELECT DISTINCT e.created_at, e.id FROM refs r JOIN events e ON e.id = r.id
+               WHERE r.name = 'p' AND r.value = ? AND e.created_at >= ? AND e.kind IN (${kinds.joinToString(",")})""",
+            arrayOf(pubkey, since.toString()),
+        ).use {
+            while (it.moveToNext()) out += it.getLong(0) to it.getString(1)
+        }
+        return out
+    }
+
     /** The gift wraps opened from [since] on, as time and id, for comparing with a relay (NIP-77). */
     fun wrapsSince(since: Long): List<Pair<Long, String>> {
         val out = ArrayList<Pair<Long, String>>()
@@ -756,6 +772,25 @@ class Store(context: Context, name: String = "struthio.db") : SQLiteOpenHelper(c
         } finally {
             db.endTransaction()
         }
+    }
+
+    /**
+     * Gives space back to the phone. Deleting rows leaves empty pages inside the database file,
+     * which SQLite reuses but never hands back, so after big cleanups the file stays at its largest.
+     * When at least [minFree] bytes sit unused, the file is rebuilt without them (VACUUM). Returns
+     * how many bytes that saved, or 0 when it wasn't worth doing.
+     */
+    fun compactIfWasteful(minFree: Long = 8L * 1024 * 1024): Long {
+        val db = writableDatabase
+        val pageSize = db.rawQuery("PRAGMA page_size", null).use { if (it.moveToFirst()) it.getLong(0) else 4096L }
+        val freePages = db.rawQuery("PRAGMA freelist_count", null).use { if (it.moveToFirst()) it.getLong(0) else 0L }
+        if (freePages * pageSize < minFree) return 0
+        val file = java.io.File(db.path)
+        val before = file.length()
+        db.execSQL("VACUUM")
+        // The rebuild passes through the write-ahead log; empty it so that space comes back too.
+        db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }
+        return (before - file.length()).coerceAtLeast(0)
     }
 
     /** Deletes everything stored, as on signing out. */

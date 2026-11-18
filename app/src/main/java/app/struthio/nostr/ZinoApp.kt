@@ -12,7 +12,9 @@ import app.struthio.nostr.data.Accounts
 import app.struthio.nostr.data.Core
 import app.struthio.nostr.data.Notifier
 import app.struthio.nostr.net.AppLog
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
@@ -60,9 +62,36 @@ class ZinoApp : Application() {
         if (started > 0) new.pool.activityStarted()
         state.value = new
         old.close()
-        // Notifications belong to the account they came from.
-        Notifier.clear(this)
         AppLog.add("switched account")
+    }
+
+    /**
+     * One background check for every signed-in account, side by side. The account in use checks
+     * through its own Core; the others each get a Core of their own for the check, closed after.
+     */
+    suspend fun checkAllAccounts() = coroutineScope {
+        val active = core
+        launch { runCatching { active.backgroundCheck() } }
+        for (account in accounts.list.value) {
+            if (account.pubkey == null || account.id == active.accountId) continue
+            launch {
+                val other = Core(this@ZinoApp, account.id, accounts)
+                try {
+                    other.backgroundCheck()
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    AppLog.add("background check failed for another account: $e")
+                } finally {
+                    other.close()
+                }
+            }
+        }
+    }
+
+    /** Opens the account a tapped notification belongs to, if it's another one still on the phone. */
+    fun openAccountOf(intent: android.content.Intent?) {
+        val id = intent?.getStringExtra(Notifier.EXTRA_ACCOUNT) ?: return
+        if (id != core.accountId && accounts.list.value.any { it.id == id && it.pubkey != null }) switchTo(id)
     }
 
     /** Adds an empty account and switches to it, which shows sign-in. */

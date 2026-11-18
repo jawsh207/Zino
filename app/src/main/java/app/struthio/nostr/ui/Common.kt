@@ -4,6 +4,8 @@
  */
 package app.struthio.nostr.ui
 
+import app.struthio.nostr.core.Blurhash
+import androidx.compose.ui.graphics.ImageBitmap
 import app.struthio.nostr.str
 import app.struthio.nostr.R
 import android.graphics.Bitmap
@@ -40,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -186,14 +189,27 @@ fun rememberImage(url: String?, width: Dp): State<Bitmap?> {
 
 /** A picture from the web, blank until it loads. */
 @Composable
-fun NetImage(url: String, width: Dp, modifier: Modifier = Modifier, scale: ContentScale = ContentScale.Crop) {
+fun NetImage(url: String, width: Dp, modifier: Modifier = Modifier, scale: ContentScale = ContentScale.Crop, blurhash: String? = null) {
     val bitmap by rememberImage(url, width)
+    // A blurred preview from the post itself fills the space until the picture arrives.
+    val preview = remember(blurhash) { blurhash?.let(::blurPreview) }
     Box(modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
-        bitmap?.let {
-            Image(it.asImageBitmap(), null, Modifier.matchParentSize(), contentScale = scale)
+        val shown = bitmap
+        if (shown != null) {
+            Image(shown.asImageBitmap(), null, Modifier.matchParentSize(), contentScale = scale)
+        } else if (preview != null) {
+            Image(preview, null, Modifier.matchParentSize(), contentScale = ContentScale.FillBounds)
         }
     }
 }
+
+/** A tiny picture painted from a blurhash, or null if it isn't one. Stretched, it stays smooth. */
+private fun blurPreview(hash: String): ImageBitmap? {
+    val pixels = Blurhash.decode(hash, BLUR_SIZE, BLUR_SIZE) ?: return null
+    return Bitmap.createBitmap(pixels, BLUR_SIZE, BLUR_SIZE, Bitmap.Config.ARGB_8888).asImageBitmap()
+}
+
+private const val BLUR_SIZE = 20
 
 /** A person's profile picture, or their initials while there isn't one. */
 @Composable

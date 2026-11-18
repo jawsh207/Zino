@@ -39,6 +39,11 @@ object Notifier {
     private const val MAX_SHOWN = 5
     private const val SUMMARY_ID = 100
     private const val MESSAGES_ID = 101
+    // Other accounts' summary and message ids start here, below the ids of single notifications.
+    private const val ACCOUNT_IDS = 200
+
+    /** The account a notification belongs to, carried to the app when it's tapped. */
+    const val EXTRA_ACCOUNT = "account"
 
     /** Sets how often the check runs, in minutes; 0 turns checks off. */
     fun schedule(context: Context, minutes: Int) {
@@ -70,11 +75,15 @@ object Notifier {
         manager.createNotificationChannel(NotificationChannel(MESSAGES, str(R.string.private_messages), NotificationManager.IMPORTANCE_HIGH))
     }
 
-    /** What tapping a notification opens: the post it's about, or just the app. */
-    private fun open(context: Context, id: Int, target: String?): PendingIntent {
+    /**
+     * What tapping a notification opens: the post it's about, or just the app, in the account it
+     * belongs to.
+     */
+    private fun open(context: Context, id: Int, target: String?, account: String): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             action = Intent.ACTION_VIEW
             target?.let { data = Uri.parse("nostr:" + Nip19.note(it)) }
+            putExtra(EXTRA_ACCOUNT, account)
         }
         return PendingIntent.getActivity(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
@@ -84,25 +93,35 @@ object Notifier {
         .setSmallIcon(R.drawable.ic_notification)
         .setAutoCancel(true)
 
-    /** Message notifications carry no sender and no text: only the app shows those. */
-    fun post(context: Context, alerts: List<Alert>, messages: Int, name: (String) -> String) {
+    /**
+     * Shows one account's news. Message notifications carry no sender and no text: only the app
+     * shows those. With several accounts, [label] names the account under each notification.
+     */
+    fun post(context: Context, alerts: List<Alert>, messages: Int, account: String, label: String?, name: (String) -> String) {
         val manager = context.getSystemService(NotificationManager::class.java)
         if (!manager.areNotificationsEnabled()) return
         channels(manager)
+        // Each account gets its own summary and message notifications, so one can't replace another's.
+        val summaryId = if (account == Accounts.FIRST) SUMMARY_ID else ACCOUNT_IDS + (account.hashCode() and 0x7fffffff) % 1900 * 2
+        val messagesId = if (account == Accounts.FIRST) MESSAGES_ID else summaryId + 1
+
+        /** A notification builder, marked with the account when there are several. */
+        fun styled(channel: String) = builder(context, channel).apply { label?.let { setSubText(it) } }
+
         if (messages > 0) {
             val text = plural(R.plurals.new_private_messages, messages, messages)
             manager.notify(
-                MESSAGES_ID,
-                builder(context, MESSAGES).setContentTitle(text).setContentIntent(open(context, MESSAGES_ID, null)).build(),
+                messagesId,
+                styled(MESSAGES).setContentTitle(text).setContentIntent(open(context, messagesId, null, account)).build(),
             )
         }
         if (alerts.size > MAX_SHOWN) {
             manager.notify(
-                SUMMARY_ID,
-                builder(context, ACTIVITY)
+                summaryId,
+                styled(ACTIVITY)
                     .setContentTitle(str(R.string.x_new_notifications, alerts.size))
                     .setContentText(alerts.first().headline(name(alerts.first().actor)))
-                    .setContentIntent(open(context, SUMMARY_ID, null))
+                    .setContentIntent(open(context, summaryId, null, account))
                     .build(),
             )
             return
@@ -111,10 +130,10 @@ object Notifier {
             val id = alert.event.id.hashCode() and 0x7fffffff or 0x1000
             manager.notify(
                 id,
-                builder(context, ACTIVITY)
+                styled(ACTIVITY)
                     .setContentTitle(alert.headline(name(alert.actor)))
                     .setContentText(alert.detail.take(200))
-                    .setContentIntent(open(context, id, alert.target))
+                    .setContentIntent(open(context, id, alert.target, account))
                     .build(),
             )
         }
@@ -130,12 +149,12 @@ object Notifier {
 class CheckService : JobService() {
     private var work: Job? = null
 
-    /** Runs one check in the background and tells Android when it's done. */
+    /** Runs one check for every account in the background and tells Android when it's done. */
     override fun onStartJob(params: JobParameters): Boolean {
-        val core = (application as ZinoApp).core
-        work = core.scope.launch {
+        val app = application as ZinoApp
+        work = app.core.scope.launch {
             try {
-                withTimeout(CHECK_LIMIT_MS) { core.backgroundCheck() }
+                withTimeout(CHECK_LIMIT_MS) { app.checkAllAccounts() }
             } catch (_: Exception) {
                 // A missed check is simply picked up by the next one, which starts from the same point.
             } finally {

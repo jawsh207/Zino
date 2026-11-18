@@ -183,6 +183,15 @@ class Core(
     val stats = mutableStateMapOf<String, Stats>()
     val follows = MutableStateFlow<Set<String>>(emptySet())
     val muted = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Muted words (NIP-51 `word`), lowercase. Posts containing one are hidden. */
+    val mutedWords = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Muted hashtags (NIP-51 `t`), lowercase and without the #. */
+    val mutedTags = MutableStateFlow<Set<String>>(emptySet())
+
+    // The muted words as one pattern, rebuilt when the list changes.
+    @Volatile private var wordPattern: Pair<Set<String>, Regex?> = emptySet<String>() to null
     val myRelays = MutableStateFlow(RelayList(DEFAULT_RELAYS, DEFAULT_RELAYS))
     val dmRelays = MutableStateFlow<List<String>>(emptyList())
 
@@ -329,20 +338,66 @@ class Core(
         follows.value = set
     }
 
-    /** Takes up a new mute list, including its private entries. */
+    /** Takes up a new mute list, including its private entries: people, words and hashtags. */
     private suspend fun applyMutes(e: Event) {
         val set = HashSet(e.tags.values("p"))
+        val words = HashSet(e.tags.values("word").map { it.trim().lowercase() })
+        val tags = HashSet(e.tags.values("t").map { it.trim().removePrefix("#").lowercase() })
         val me = signer.value
         if (me != null && e.content.isNotBlank() && !e.content.contains("?iv=")) {
             runCatching {
                 val list = org.json.JSONArray(me.nip44Decrypt(e.content, me.pubkey))
                 for (i in 0 until list.length()) {
                     val tag = list.optJSONArray(i) ?: continue
-                    if (tag.optString(0) == "p") set += tag.optString(1)
+                    when (tag.optString(0)) {
+                        "p" -> set += tag.optString(1)
+                        "word" -> words += tag.optString(1).trim().lowercase()
+                        "t" -> tags += tag.optString(1).trim().removePrefix("#").lowercase()
+                    }
                 }
             }
         }
         muted.value = set
+        mutedWords.value = words.filter(String::isNotEmpty).toSet()
+        mutedTags.value = tags.filter(String::isNotEmpty).toSet()
+    }
+
+    /**
+     * True if a post is hidden by a muted word or hashtag. Words match whole words, so muting "art"
+     * hides "art" and "Art!" but not "start".
+     */
+    fun mutedContent(e: Event): Boolean {
+        val tags = mutedTags.value
+        if (tags.isNotEmpty() && e.tags.values("t").any { it.lowercase() in tags }) return true
+        if (tags.isNotEmpty() && HASHTAG.findAll(e.content).any { it.groupValues[1].lowercase() in tags }) return true
+        val words = mutedWords.value
+        if (words.isEmpty()) return false
+        val (built, pattern) = wordPattern
+        val regex = if (built == words) pattern else mutePattern(words).also { wordPattern = words to it }
+        return regex?.containsMatchIn(e.content) == true
+    }
+
+    /** True if a post is hidden: by a muted person, word or hashtag. */
+    fun hides(e: Event): Boolean = e.pubkey in muted.value || mutedContent(e)
+
+    /** Your notifications, newest first, without anything muted. */
+    fun visibleAlerts(me: String, limit: Int): List<Alert> = store.alerts(me, muted.value, limit).filterNot { mutedContent(it.event) }
+
+    /**
+     * Adds or removes a muted word or hashtag ([name] is "word" or "t") on the newest mute list on
+     * your relays, keeping everything else on it, including private entries.
+     */
+    suspend fun setMutedTerm(name: String, value: String, mute: Boolean) {
+        val term = value.trim().removePrefix(if (name == "t") "#" else "").lowercase()
+        if (term.isEmpty()) return
+        val me = author()
+        if (!latestFromRelays(me, Kind.MUTES)) throw UserError(str(R.string.could_not_reach_your_relays_try))
+        val current = store.latest(me, Kind.MUTES)
+        val tags = current?.tags.orEmpty().filterNot { it.size >= 2 && it[0] == name && it[1].lowercase() == term }
+        publish(Draft(me, nowSeconds(), Kind.MUTES, if (mute) tags + listOf(listOf(name, term)) else tags, current?.content ?: ""))
+        val flow = if (name == "t") mutedTags else mutedWords
+        flow.value = if (mute) flow.value + term else flow.value - term
+        changes.tryEmit(Unit)
     }
 
     /**
@@ -810,14 +865,19 @@ class Core(
         wallet.disconnect()
         prefs.edit().clear().apply()
         store.clearAll()
-        Notifier.schedule(context, 0)
-        Notifier.clear(context)
+        // Other accounts on the phone still want their checks and their notifications.
+        if (accounts?.list?.value?.none { it.id != accountId && it.pubkey != null } != false) {
+            Notifier.schedule(context, 0)
+            Notifier.clear(context)
+        }
         signer.value = null
         sessionLoaded.value = false
         bookmarks.value = emptySet()
         trustedSet.value = emptySet()
         follows.value = emptySet()
         muted.value = emptySet()
+        mutedWords.value = emptySet()
+        mutedTags.value = emptySet()
         dmRelays.value = emptyList()
         myRelays.value = RelayList(DEFAULT_RELAYS, DEFAULT_RELAYS)
         withContext(Dispatchers.Main) {
@@ -851,14 +911,54 @@ class Core(
             }
             sessionSubs.forEach(pool::close)
             sessionSubs.clear()
-            val since = nowSeconds() - 14 * 86400
-            sessionSubs += pool.subscribe(
-                readRelays(),
-                listOf(Filter(kinds = ALERT_KINDS, tags = mapOf("p" to listOf(pubkey)), since = since, limit = 200)),
-                onEvent = ::ingest,
-            )
+            startAlertSubscription(pubkey)
             startDmSubscription()
         }
+    }
+
+    /**
+     * Listens on your read relays for replies, mentions, reactions, boosts and zaps from the last two
+     * weeks. Relays that can compare lists (NIP-77) send only what's missing here and then just what's
+     * new; the rest send the two weeks again, up to 200 events.
+     */
+    private fun startAlertSubscription(pubkey: String) {
+        val relays = readRelays()
+        val since = nowSeconds() - 14 * 86400
+        scope.launch {
+            val filter = Filter(kinds = ALERT_KINDS, tags = mapOf("p" to listOf(pubkey)), since = since)
+            val synced = compareAndFetch(relays, filter, store.taggedSince(pubkey, ALERT_KINDS, since), "notifications", ::ingest)
+            val tagged = mapOf("p" to listOf(pubkey))
+            if (synced.isNotEmpty()) {
+                sessionSubs += pool.subscribe(synced, listOf(Filter(kinds = ALERT_KINDS, tags = tagged, since = nowSeconds() - 60)), onEvent = ::ingest)
+            }
+            if (synced.size < relays.size) {
+                sessionSubs += pool.subscribe(relays - synced, listOf(Filter(kinds = ALERT_KINDS, tags = tagged, since = since, limit = 200)), onEvent = ::ingest)
+            }
+        }
+    }
+
+    /**
+     * Compares the events matching [filter] with each relay (NIP-77) and fetches, by id, only the
+     * ones missing here, handing each to [onEvent]. Returns the relays that could compare; the
+     * others need a plain request instead.
+     */
+    private suspend fun compareAndFetch(
+        relays: Set<String>,
+        filter: Filter,
+        have: List<Pair<Long, String>>,
+        what: String,
+        onEvent: (Event, String) -> Unit,
+    ): Set<String> = coroutineScope {
+        val compared = relays.map { url -> async { url to pool.missing(url, filter, have) } }.awaitAll()
+        for ((url, ids) in compared) {
+            if (ids.isNullOrEmpty()) continue
+            AppLog.add("$url $what compared: ${ids.size} missing")
+            // Fetched by id, in batches a relay will take in one filter.
+            for (batch in ids.chunked(100)) pool.query(setOf(url), listOf(Filter(ids = batch)), 10_000, onEvent = onEvent)
+        }
+        val synced = compared.filter { it.second != null }.map { it.first }.toSet()
+        if (synced.isNotEmpty()) AppLog.add("compared $what with ${synced.size} of ${relays.size} relays")
+        synced
     }
 
     /**
@@ -877,18 +977,7 @@ class Core(
         }
         scope.launch {
             val filter = Filter(kinds = listOf(Kind.GIFT_WRAP), tags = mapOf("p" to listOf(pubkey)), since = since)
-            val have = store.wrapsSince(since)
-            val compared = relays.map { url -> async { url to pool.missing(url, filter, have) } }.awaitAll()
-            val synced = compared.filter { it.second != null }.map { it.first }.toSet()
-            for ((url, ids) in compared) {
-                if (ids.isNullOrEmpty()) continue
-                AppLog.add("$url inbox compared: ${ids.size} messages missing")
-                // Fetched by id, in batches a relay will take in one filter.
-                for (batch in ids.chunked(100)) {
-                    pool.query(setOf(url), listOf(Filter(ids = batch)), 10_000) { wrap, _ -> scope.launch { receiveWrap(wrap) } }
-                }
-            }
-            if (synced.isNotEmpty()) AppLog.add("compared inboxes with ${synced.size} of ${relays.size} relays")
+            val synced = compareAndFetch(relays, filter, store.wrapsSince(since), "inbox") { wrap, _ -> scope.launch { receiveWrap(wrap) } }
             // Compared relays are already up to date: from them, only what arrives from now on.
             if (synced.isNotEmpty()) subscribeDms(pubkey, synced, nowSeconds() - 60)
             if (synced.size < relays.size) subscribeDms(pubkey, relays - synced, since)
@@ -1904,16 +1993,36 @@ class Core(
                 prefs.edit().putStringSet("notified_wraps", (seen + fresh.map { it.id }).toList().takeLast(300).toSet()).apply()
             }
             delay(500)
-            val alerts = store.alerts(pubkey, muted.value, 30).filter { it.event.createdAt > since }
+            val alerts = visibleAlerts(pubkey, 30).filter { it.event.createdAt > since }
             val names = notificationNames(alerts.map { it.actor }.distinct(), checker)
             AppLog.add("background check: ${alerts.size} alerts, $messages messages, ${answered.size} relays answered")
-            Notifier.post(context, alerts, messages) { names[it] ?: shortNpub(it) }
+            // With several accounts, each notification says whose it is.
+            val label = if ((accounts?.list?.value?.count { it.pubkey != null } ?: 1) > 1) {
+                accounts?.list?.value?.firstOrNull { it.id == accountId }?.name?.takeIf { it.isNotBlank() } ?: displayName(pubkey)
+            } else {
+                null
+            }
+            Notifier.post(context, alerts, messages, accountId, label) { names[it] ?: shortNpub(it) }
             if (answered.isNotEmpty()) prefs.edit().putLong("notify_since", now).apply()
             // Whatever couldn't be sent earlier gets another chance while connected anyway.
             if (waiting.value > 0) sendWaiting(checker)
+            compactNow()
         } finally {
             checker.shutdown()
         }
+    }
+
+    /**
+     * Shrinks the database file at most once a week, during a background check: rebuilding it
+     * takes a moment and would only slow the app down while it's open.
+     */
+    private fun compactNow() {
+        val now = nowSeconds()
+        if (now - prefs.getLong("compacted_at", 0L) < COMPACT_EVERY_S) return
+        prefs.edit().putLong("compacted_at", now).apply()
+        runCatching { store.compactIfWasteful() }
+            .onSuccess { saved -> if (saved > 0) AppLog.add("database compacted: ${saved / 1024} KB freed") }
+            .onFailure { AppLog.add("database compaction failed: $it") }
     }
 
     /** Names for a notification, fetched here because nothing on screen has asked for them. */
@@ -2047,7 +2156,7 @@ class Core(
     fun unreadAlerts(me: String): Set<String> {
         val since = prefs.getLong("alerts_read", 0L)
         val read = store.readAlerts()
-        return store.alerts(me, muted.value, 150).filter { it.event.createdAt > since && it.event.id !in read }.map { it.event.id }.toSet()
+        return visibleAlerts(me, 150).filter { it.event.createdAt > since && it.event.id !in read }.map { it.event.id }.toSet()
     }
 
     /** How many unread messages each chat has. */
@@ -2160,6 +2269,17 @@ class Core(
         /** The throwaway key Zino uses to talk to a NIP-46 remote signer. */
         const val KEY_BUNKER = "nip46_client"
         const val KEY_NWC = "nwc"
+        private val HASHTAG = Regex("""(?<![\p{L}\p{N}_])#([\p{L}\p{N}_]+)""")
+
+        /** One pattern matching any of [words] as a whole word, ignoring case. */
+        fun mutePattern(words: Set<String>): Regex? {
+            if (words.isEmpty()) return null
+            val alternatives = words.sortedByDescending { it.length }.joinToString("|") { Regex.escape(it) }
+            return Regex("""(?<![\p{L}\p{N}])(?:$alternatives)(?![\p{L}\p{N}])""", RegexOption.IGNORE_CASE)
+        }
+
+        private const val COMPACT_EVERY_S = 7 * 86400L
+
         /** How long unsent events are kept trying before giving up. */
         private const val OUTBOX_KEEP_S = 3 * 86400L
         private const val OUTBOX_RETRY_MS = 120_000L

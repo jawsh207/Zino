@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
                 reply.completeExceptionally(e)
             }
         }
+        app.openAccountOf(intent)
         deepLink.value = intent?.dataString
         setContent {
             ZinoTheme {
@@ -78,6 +79,7 @@ class MainActivity : ComponentActivity() {
     /** A link opened while Zino was already running. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        app.openAccountOf(intent)
         deepLink.value = intent.dataString
     }
 

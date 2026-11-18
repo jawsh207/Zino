@@ -15,7 +15,8 @@ The name comes from *struzzino*, Italian for a baby ostrich, cut down to its las
 - Background notification checks every 15 minutes by default, through Android's own scheduler
 - Bookmarks, drafts, content warnings, @mentions, reporting, video and link previews
 - A follows-of-follows filter for Global and Trending
-- Several accounts on one phone, each kept separate, switched from Settings
+- Several accounts on one phone, each kept separate, switched from Settings, with notifications for all of them
+- Muted words and hashtags
 - Posts, reactions and messages made without a connection are kept and sent once it's back
 - Ready for translation: all text is in `strings.xml`, and Android's per-app language setting works
 
@@ -44,14 +45,14 @@ Zino implements the current form of each specification and writes no deprecated 
 | 47 | Nostr Wallet Connect, NIP-44 only |
 | 50 | Search |
 | 49 | Encrypted key backup |
-| 51 | Mute list, bookmarks, search relays |
+| 51 | Mute list (people, words and hashtags), bookmarks, search relays |
 | 55 | External signer apps |
 | 56 | Reports |
 | 57 | Zaps, including split tags and receipt validation |
 | 65 | Relay lists and the outbox model |
-| 77 | Negentropy: catching up on messages by comparing lists with relays |
+| 77 | Negentropy: catching up on messages and notifications by comparing lists with relays |
 | 88 | Polls |
-| 92 | Media attachments |
+| 92 | Media attachments, with blurred previews while pictures load |
 | B7 | Blossom uploads and media server lists |
 
 Not used on purpose: NIP-04, NIP-06, NIP-08, NIP-26, NIP-96 and relay lists inside kind 3.

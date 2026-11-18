@@ -320,6 +320,7 @@ private fun NoteContent(event: Event, detail: Boolean, inQuote: Boolean) {
                 .aspectRatio((media.aspect ?: 1.5f).coerceIn(0.7f, 2.4f))
                 .clip(RoundedCornerShape(20.dp))
                 .clickable { viewing = index },
+            blurhash = media.blurhash,
         )
     }
     viewing?.let { start -> ImageViewer(body.images.map { it.url }, start) { viewing = null } }

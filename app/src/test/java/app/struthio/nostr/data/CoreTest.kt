@@ -9,6 +9,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -80,5 +81,22 @@ class CoreTest {
         // Still no connection: trying again keeps it.
         core.sendWaiting()
         assertEquals(1, core.waiting.value)
+    }
+
+    @Test
+    fun mutedWordsMatchWholeWordsAndHashtagsMatchTagsOrText() {
+        val note = { content: String, tags: List<List<String>> ->
+            alice.signNow(Draft(alice.pubkey, nowSeconds(), Kind.NOTE, tags, content))
+        }
+        core.mutedWords.value = setOf("art", "spoiler alert")
+        core.mutedTags.value = setOf("politics")
+        assertTrue(core.mutedContent(note("I love ART!", emptyList())))
+        assertTrue(core.mutedContent(note("Spoiler alert: it ends", emptyList())))
+        assertFalse(core.mutedContent(note("let's start", emptyList())))
+        assertTrue(core.mutedContent(note("hmm", listOf(listOf("t", "Politics")))))
+        assertTrue(core.mutedContent(note("so much #politics today", emptyList())))
+        assertFalse(core.mutedContent(note("politics without a tag", emptyList())))
+        core.mutedWords.value = emptySet()
+        assertFalse(core.mutedContent(note("I love art", emptyList())))
     }
 }

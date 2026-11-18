@@ -67,6 +67,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.PersonAdd
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.runtime.collectAsState
 import app.struthio.nostr.ZinoApp
 import androidx.compose.material.icons.rounded.Bookmarks
@@ -251,6 +252,7 @@ fun SettingsScreen() {
             Group(
                 str(R.string.account),
                 { SettingRow(it, Icons.Rounded.Bookmarks, str(R.string.bookmarks)) { nav.push(Screen.Bookmarks) } },
+                { SettingRow(it, Icons.Rounded.VisibilityOff, str(R.string.muted_words_and_hashtags), str(R.string.muted_words_summary)) { nav.push(Screen.Mutes) } },
                 if (hasKey) {
                     { SettingRow(it, Icons.Rounded.Lock, str(R.string.encrypted_key_backup), str(R.string.export_your_key_protected_by_a)) { sealing = true } }
                 } else {
