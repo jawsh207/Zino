@@ -86,7 +86,7 @@ tasks.withType<Test>().configureEach {
     maxHeapSize = "2g"
     // Failed tests print their name and cause in the build log, where CI can report them.
     testLogging {
-        events("failed", "standard_out")
+        events("failed")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     }
 }

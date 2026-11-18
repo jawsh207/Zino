@@ -775,10 +775,10 @@ class Store(context: Context, name: String = "struthio.db") : SQLiteOpenHelper(c
     }
 
     /**
-     * Gives space back to the phone. Deleting rows leaves empty pages inside the database file,
-     * which SQLite reuses but never hands back, so after big cleanups the file stays at its largest.
-     * When at least [minFree] bytes sit unused, the file is rebuilt without them (VACUUM). Returns
-     * how many bytes that saved, or 0 when it wasn't worth doing.
+     * Gives space back to the phone. Android's SQLite already trims the file as rows are deleted
+     * (auto-vacuum), so this is a safety net: when at least [minFree] bytes still sit unused inside
+     * the file, it's rebuilt without them (VACUUM). Returns how many bytes that saved, or 0 when it
+     * wasn't worth doing.
      */
     fun compactIfWasteful(minFree: Long = 8L * 1024 * 1024): Long {
         val db = writableDatabase

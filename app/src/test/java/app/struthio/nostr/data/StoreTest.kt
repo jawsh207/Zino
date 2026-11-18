@@ -201,20 +201,16 @@ class StoreTest {
     }
 
     @Test
-    fun compactingGivesSpaceBackAfterACleanup() {
+    fun spaceComesBackAfterACleanup() {
         val text = "x".repeat(2000)
         insert(*(1..600).map { event(bob, Kind.NOTE, it.toLong(), "$text $it") }.toTypedArray())
         assertEquals(0L, store.compactIfWasteful(minFree = Long.MAX_VALUE))
         val path = store.readableDatabase.path
         val full = java.io.File(path).length()
         store.clearAll()
-        val saved = store.compactIfWasteful(minFree = 1)
-        val after = java.io.File(path).length()
-        assertTrue("saved $saved, file $full then $after", saved > 0 || after < full)
-        val mode = store.readableDatabase.rawQuery("PRAGMA auto_vacuum", null).use { it.moveToFirst(); it.getInt(0) }
-        val journal = store.readableDatabase.rawQuery("PRAGMA journal_mode", null).use { it.moveToFirst(); it.getString(0) }
-        println("COMPACT-PROBE auto_vacuum=$mode journal=$journal saved=$saved full=$full after=$after")
-        // Nothing left to give back the second time.
+        // Android's SQLite trims the file as rows go (auto-vacuum); compacting covers the rest.
+        store.compactIfWasteful(minFree = 1)
+        assertTrue(java.io.File(path).length() < full / 4)
         assertEquals(0L, store.compactIfWasteful(minFree = 1))
     }
 }

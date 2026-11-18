@@ -161,7 +161,7 @@ Message notifications never say who sent the message or what it says.
 
 **Every account.** `ZinoApp.checkAllAccounts` runs the check for the account in use and, side by side, for each other signed-in account through a short-lived `Core` of its own, closed afterwards. Each account has its own summary and message notifications, so one can't replace another's. With more than one account, each notification names its account, and tapping one switches to that account first (`Notifier.EXTRA_ACCOUNT`).
 
-**Shrinking the database.** At most once a week, a background check runs `Store.compactIfWasteful`. If cleanups have left 8 MB or more of empty space inside the database file, it rebuilds the file (VACUUM) so the phone gets that space back. It runs in the background because the rebuild would slow the app down while it's open.
+**Shrinking the database.** Android's SQLite trims the database file as rows are deleted (auto-vacuum), so space from cleanups mostly comes back by itself. As a safety net, at most once a week a background check runs `Store.compactIfWasteful`: if 8 MB or more of empty space is left inside the file anyway, it rebuilds the file (VACUUM). That runs in the background because the rebuild would slow the app down while it's open.
 
 ## Muting
 
