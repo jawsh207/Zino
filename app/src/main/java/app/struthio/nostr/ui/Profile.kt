@@ -207,7 +207,7 @@ fun ProfileScreen(pubkey: String) {
     Box(Modifier.fillMaxSize()) {
         NoteList(feed, Modifier.fillMaxSize(), state = listState, pillTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 72.dp, empty = tab.emptyText, filter = tab::shows, gallery = tab == ProfileTab.GALLERY, header = {
             Column(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ProfileBanner(pubkey, profile?.banner)
+                ProfileBanner(pubkey, profile?.banner, profile?.picture)
                 Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             EmojiText(core.richName(pubkey), profile?.emoji.orEmpty(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f, fill = false))
@@ -594,12 +594,15 @@ fun GalleryRow(row: List<Pair<Event, GalleryItem>>) {
 /**
  * The banner across the whole width, up behind the status bar and the back button, with the
  * avatar half over its lower edge, ringed in the page colour. Without a banner, a plain band.
+ * Tapping the avatar opens the profile picture full size.
  */
 @Composable
-private fun ProfileBanner(pubkey: String, banner: String?) {
+private fun ProfileBanner(pubkey: String, banner: String?, picture: String?) {
     val avatar = 84.dp
     val ring = 4.dp
     val shape = avatarShape(pubkey)
+    var viewing by remember { mutableStateOf(false) }
+    val full = picture?.takeIf { it.startsWith("https://") }
     BoxWithConstraints(Modifier.fullBleed(PageGutter)) {
         // Banners are made 3:1; that much shows below the status bar.
         val bannerHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + maxWidth / 3
@@ -607,11 +610,13 @@ private fun ProfileBanner(pubkey: String, banner: String?) {
             BannerArea(banner, Modifier.fillMaxWidth().height(bannerHeight))
             Box(
                 Modifier.align(Alignment.BottomStart).padding(start = PageGutter - ring)
-                    .size(avatar + ring * 2).clip(shape).background(MaterialTheme.colorScheme.background),
+                    .size(avatar + ring * 2).clip(shape).background(MaterialTheme.colorScheme.background)
+                    .then(if (full != null) Modifier.clickable(onClickLabel = str(R.string.view_picture)) { viewing = true } else Modifier),
                 contentAlignment = Alignment.Center,
             ) { Avatar(pubkey, avatar) }
         }
     }
+    if (viewing && full != null) ImageViewer(listOf(full), 0) { viewing = false }
 }
 
 /** The profile's banner picture, or a plain colour without one. */

@@ -454,4 +454,6 @@
         <item quantity="one">New private message</item>
         <item quantity="other">%1$s new private messages</item>
     </plurals>
+    <!-- Spoken by screen readers for tapping a profile picture. -->
+    <string name="view_picture">View picture</string>
 </resources>
