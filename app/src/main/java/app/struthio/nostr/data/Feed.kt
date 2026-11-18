@@ -15,7 +15,12 @@ import app.struthio.nostr.core.threadRef
 import app.struthio.nostr.core.values
 import app.struthio.nostr.net.Subscription
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -46,8 +51,10 @@ class Feed(private val core: Core, private val source: FeedSource) {
     val loading = MutableStateFlow(true)
 
     private val byId = LinkedHashMap<String, Event>()
-    private val subs = ArrayList<Subscription>()
+    private val subs = java.util.concurrent.CopyOnWriteArrayList<Subscription>()
     private var flushJob: Job? = null
+    private var startJob: Job? = null
+    private var muteJob: Job? = null
     private var started = false
     private var coverage: Map<String, Set<String>> = emptyMap()
     private var moreRunning = false
@@ -65,7 +72,14 @@ class Feed(private val core: Core, private val source: FeedSource) {
     fun start() {
         if (started) return
         started = true
-        core.scope.launch {
+        // Muting someone, a word or a hashtag takes their posts out of a list already showing.
+        muteJob = core.scope.launch {
+            combine(core.muted, core.mutedWords, core.mutedTags) { _, _, _ -> }.drop(1).collect {
+                synchronized(byId) { byId.values.removeAll { core.hides(it) } }
+                flush()
+            }
+        }
+        startJob = core.scope.launch {
             preload()
             when (source) {
                 FeedSource.Trending -> loadTrending()
@@ -77,8 +91,13 @@ class Feed(private val core: Core, private val source: FeedSource) {
         }
     }
 
-    /** Closes the feed's relay subscriptions. */
+    /**
+     * Closes the feed's relay subscriptions. Loading still under way stops too, so a feed left
+     * mid-start can't open subscriptions afterwards that nothing would close.
+     */
     fun stop() {
+        startJob?.cancel()
+        muteJob?.cancel()
         subs.forEach(core.pool::close)
         subs.clear()
         flushJob?.cancel()
@@ -164,12 +183,18 @@ class Feed(private val core: Core, private val source: FeedSource) {
             val groups = if (authors.isEmpty()) listOf(null) else authors.chunked(Core.MAX_AUTHORS)
             for (group in groups) {
                 waiting.incrementAndGet()
-                subs += core.pool.subscribe(
+                val sub = core.pool.subscribe(
                     setOf(relay),
                     listOf(filterFor(group, newest?.minus(3600))),
                     onDone = { _, _ -> waiting.decrementAndGet() },
                     onEvent = ::receive,
                 )
+                subs += sub
+                // Stopped meanwhile: stop() may already have closed the others, so close this one here.
+                if (!currentCoroutineContext().isActive) {
+                    core.pool.close(sub)
+                    return
+                }
             }
         }
         // "Nothing here yet" only once the relays have had their say: stop waiting when posts are
@@ -223,6 +248,11 @@ class Feed(private val core: Core, private val source: FeedSource) {
 
     /** Publishes the list, newest first. */
     private fun flush() {
+        if (source == FeedSource.Trending) {
+            // Trending keeps its own order; only muting changes it here.
+            notes.value = notes.value.filterNot(core::hides)
+            return
+        }
         notes.value = synchronized(byId) { byId.values.sortedByDescending { it.createdAt } }
     }
 
@@ -232,19 +262,31 @@ class Feed(private val core: Core, private val source: FeedSource) {
         val oldest = notes.value.lastOrNull()?.createdAt ?: return
         moreRunning = true
         core.scope.launch {
-            val cached = cached(oldest)
-            cached.forEach { add(it) }
-            flush()
-            if (cached.size < PAGE / 2) {
-                for ((relay, authors) in coverage) {
-                    if (source == FeedSource.Following && authors.isEmpty()) continue
-                    val groups = if (authors.isEmpty()) listOf(null) else authors.chunked(Core.MAX_AUTHORS)
-                    groups.forEach { group -> core.pool.query(setOf(relay), listOf(filterFor(group, null, oldest)), 5000, ::receive) }
-                }
-                flush()
+            try {
+                loadOlder(oldest)
+            } finally {
+                moreRunning = false
             }
-            moreRunning = false
         }
+    }
+
+    /**
+     * Older posts from before [oldest]: from the database, and from relays when it has few. The
+     * relays are asked all at once, so one slow relay doesn't hold up the rest.
+     */
+    private suspend fun loadOlder(oldest: Long) {
+        val cached = cached(oldest)
+        cached.forEach { add(it) }
+        flush()
+        if (cached.size >= PAGE / 2) return
+        coroutineScope {
+            for ((relay, authors) in coverage) {
+                if (source == FeedSource.Following && authors.isEmpty()) continue
+                val groups = if (authors.isEmpty()) listOf(null) else authors.chunked(Core.MAX_AUTHORS)
+                groups.forEach { group -> launch { core.pool.query(setOf(relay), listOf(filterFor(group, null, oldest)), 5000, ::receive) } }
+            }
+        }
+        flush()
     }
 
     /** What the relays are reacting to right now, counted here rather than taken from a ranking service. */

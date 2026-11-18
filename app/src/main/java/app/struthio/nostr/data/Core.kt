@@ -660,7 +660,7 @@ class Core(
         applyCachedMutes(pubkey)
         wantProfile(pubkey)
         startSession()
-        Notifier.schedule(context, notifyMinutes())
+        rescheduleChecks()
     }
 
     /** Takes up the account's follows and relays from the database. */
@@ -866,10 +866,8 @@ class Core(
         prefs.edit().clear().apply()
         store.clearAll()
         // Other accounts on the phone still want their checks and their notifications.
-        if (accounts?.list?.value?.none { it.id != accountId && it.pubkey != null } != false) {
-            Notifier.schedule(context, 0)
-            Notifier.clear(context)
-        }
+        rescheduleChecks(leaving = true)
+        if (accounts?.list?.value?.none { it.id != accountId && it.pubkey != null } != false) Notifier.clear(context)
         signer.value = null
         sessionLoaded.value = false
         bookmarks.value = emptySet()
@@ -1951,10 +1949,24 @@ class Core(
     /** How often notifications are checked, in minutes; 0 is never. */
     fun notifyMinutes() = prefs.getInt("notify_minutes", Notifier.DEFAULT_MINUTES)
 
-    /** Sets how often notifications are checked, and reschedules. */
+    /** Sets how often this account's notifications are checked, and reschedules. */
     fun setNotifyMinutes(minutes: Int) {
         prefs.edit().putInt("notify_minutes", minutes).apply()
-        Notifier.schedule(context, minutes)
+        rescheduleChecks()
+    }
+
+    /**
+     * Android runs one check job for the whole app, so it's set to the most frequent interval any
+     * signed-in account wants, and off only when every account has checks off. Each account then
+     * skips the runs that come sooner than its own setting. [leaving] leaves this account out, as
+     * when it signs out.
+     */
+    private fun rescheduleChecks(leaving: Boolean = false) {
+        val others = accounts?.list?.value?.filter { it.pubkey != null && it.id != accountId }.orEmpty()
+        val wanted = others.map {
+            context.getSharedPreferences(Accounts.settingsName(it.id), Context.MODE_PRIVATE).getInt("notify_minutes", Notifier.DEFAULT_MINUTES)
+        } + if (leaving) emptyList() else listOf(notifyMinutes())
+        Notifier.schedule(context, wanted.filter { it > 0 }.minOrNull() ?: 0)
     }
 
     /** One scheduled check: connect briefly, fetch what is new, notify, disconnect. */
@@ -1963,6 +1975,10 @@ class Core(
         val active = signer.value ?: return
         val pubkey = active.pubkey
         val now = nowSeconds()
+        // The shared job may run more often than this account asked for, or for an account with checks off.
+        val minutes = notifyMinutes()
+        if (minutes <= 0) return
+        if (now - prefs.getLong("checked_at", 0L) < minutes * 60L * 3 / 4) return
         val since = prefs.getLong("notify_since", now - FIRST_CHECK_WINDOW_S)
         if (pool.isVisible) {
             // On screen, activity shows up by itself. The first background check looks back a few
@@ -1970,6 +1986,7 @@ class Core(
             if (prefs.contains("notify_since")) prefs.edit().putLong("notify_since", now).apply()
             return
         }
+        prefs.edit().putLong("checked_at", now).apply()
         val checker = RelayPool(scope, relayStats) { signer.value }
         checker.activityStarted()
         try {

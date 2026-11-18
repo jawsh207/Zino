@@ -150,7 +150,7 @@ Zap receipts only count after they're checked against the key of the lightning s
 
 ## Notifications
 
-Zino uses no push service. `data/Notifier.kt` asks Android's JobScheduler to run a short check every so often (15 minutes by default). Each check runs `Core.backgroundCheck`:
+Zino uses no push service. `data/Notifier.kt` asks Android's JobScheduler to run a short check every so often (15 minutes by default). There's one job for the whole app, set to the most frequent interval any signed-in account wants; each account skips runs that come sooner than its own setting, and an account with checks off is never checked. Each check runs `Core.backgroundCheck`:
 
 1. connect to relays,
 2. look for new replies, mentions, reactions, zaps and messages,
