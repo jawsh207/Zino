@@ -594,29 +594,34 @@ fun GalleryRow(row: List<Pair<Event, GalleryItem>>) {
 /**
  * The banner across the whole width, up behind the status bar and the back button, with the
  * avatar half over its lower edge, ringed in the page colour. Without a banner, a plain band.
- * Tapping the avatar opens the profile picture full size.
+ * Tapping the avatar or the banner opens that picture full size.
  */
 @Composable
 private fun ProfileBanner(pubkey: String, banner: String?, picture: String?) {
     val avatar = 84.dp
     val ring = 4.dp
     val shape = avatarShape(pubkey)
-    var viewing by remember { mutableStateOf(false) }
+    var viewing by remember { mutableStateOf<String?>(null) }
     val full = picture?.takeIf { it.startsWith("https://") }
+    val wide = banner?.takeIf { it.startsWith("https://") }
     BoxWithConstraints(Modifier.fullBleed(PageGutter)) {
         // Banners are made 3:1; that much shows below the status bar.
         val bannerHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + maxWidth / 3
         Box(Modifier.fillMaxWidth().height(bannerHeight + avatar / 2 + ring)) {
-            BannerArea(banner, Modifier.fillMaxWidth().height(bannerHeight))
+            BannerArea(
+                banner,
+                Modifier.fillMaxWidth().height(bannerHeight)
+                    .then(if (wide != null) Modifier.clickable(onClickLabel = str(R.string.view_banner)) { viewing = wide } else Modifier),
+            )
             Box(
                 Modifier.align(Alignment.BottomStart).padding(start = PageGutter - ring)
                     .size(avatar + ring * 2).clip(shape).background(MaterialTheme.colorScheme.background)
-                    .then(if (full != null) Modifier.clickable(onClickLabel = str(R.string.view_picture)) { viewing = true } else Modifier),
+                    .then(if (full != null) Modifier.clickable(onClickLabel = str(R.string.view_picture)) { viewing = full } else Modifier),
                 contentAlignment = Alignment.Center,
             ) { Avatar(pubkey, avatar) }
         }
     }
-    if (viewing && full != null) ImageViewer(listOf(full), 0) { viewing = false }
+    viewing?.let { ImageViewer(listOf(it), 0) { viewing = null } }
 }
 
 /** The profile's banner picture, or a plain colour without one. */

@@ -456,4 +456,6 @@
     </plurals>
     <!-- Spoken by screen readers for tapping a profile picture. -->
     <string name="view_picture">View picture</string>
+    <!-- Spoken by screen readers for tapping a profile banner. -->
+    <string name="view_banner">View banner</string>
 </resources>
