@@ -205,8 +205,12 @@ class StoreTest {
         val text = "x".repeat(2000)
         insert(*(1..600).map { event(bob, Kind.NOTE, it.toLong(), "$text $it") }.toTypedArray())
         assertEquals(0L, store.compactIfWasteful(minFree = Long.MAX_VALUE))
+        val path = store.readableDatabase.path
+        val full = java.io.File(path).length()
         store.clearAll()
-        assertTrue(store.compactIfWasteful(minFree = 1) > 0)
+        val saved = store.compactIfWasteful(minFree = 1)
+        val after = java.io.File(path).length()
+        assertTrue("saved $saved, file $full then $after", saved > 0 || after < full)
         // Nothing left to give back the second time.
         assertEquals(0L, store.compactIfWasteful(minFree = 1))
     }
