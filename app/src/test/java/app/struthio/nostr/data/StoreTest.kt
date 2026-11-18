@@ -211,6 +211,9 @@ class StoreTest {
         val saved = store.compactIfWasteful(minFree = 1)
         val after = java.io.File(path).length()
         assertTrue("saved $saved, file $full then $after", saved > 0 || after < full)
+        val mode = store.readableDatabase.rawQuery("PRAGMA auto_vacuum", null).use { it.moveToFirst(); it.getInt(0) }
+        val journal = store.readableDatabase.rawQuery("PRAGMA journal_mode", null).use { it.moveToFirst(); it.getString(0) }
+        println("COMPACT-PROBE auto_vacuum=$mode journal=$journal saved=$saved full=$full after=$after")
         // Nothing left to give back the second time.
         assertEquals(0L, store.compactIfWasteful(minFree = 1))
     }
