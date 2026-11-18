@@ -964,9 +964,10 @@ class Core(
     private val sendingWaiting = Mutex()
 
     /**
-     * Tries again to send everything waiting, through [via]. Stops at the first event that still
-     * can't go, as the connection is likely still down. Events relays refuse outright are dropped,
-     * and so is anything still unsent after a few days.
+     * Tries again to send everything waiting, through [via]. When an event still can't go and no
+     * relay is connected, the phone is likely still offline, so it stops there. When others are
+     * connected, only that event's relays are down, so it waits and the rest go ahead. Events
+     * relays refuse outright are dropped, and so is anything still unsent after a few days.
      */
     suspend fun sendWaiting(via: RelayPool = pool) {
         if (!sendingWaiting.tryLock()) return
@@ -976,7 +977,10 @@ class Core(
             var sent = 0
             for ((event, relays) in store.outgoing()) {
                 val result = via.publishFirst(event, relays)
-                if (!result.ok && result.retryable) break
+                if (!result.ok && result.retryable) {
+                    // One dead relay mustn't hold up everything behind it for days.
+                    if (via.anyLive) continue else break
+                }
                 store.removeOutgoing(event.id)
                 if (result.ok) sent++ else AppLog.add("dropped waiting kind ${event.kind}: ${result.message}")
             }

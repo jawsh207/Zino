@@ -165,4 +165,38 @@ class StoreTest {
         assertTrue(store.searchNotes("hello", 10).isEmpty())
         assertEquals(0, store.outgoingCount())
     }
+
+    @Test
+    fun pruningDropsOldStrangersButKeepsYoursAndBookmarks() {
+        val old = (1..4).map { event(bob, Kind.NOTE, it * 100L, "bob $it") }
+        val mine = event(alice, Kind.NOTE, 50, "mine")
+        val saved = event(bob, Kind.NOTE, 60, "saved")
+        val picture = event(bob, Kind.PICTURE, 70, "picture")
+        val list = event(alice, Kind.BOOKMARKS, 500, tags = listOf(listOf("e", saved.id)))
+        insert(*old.toTypedArray(), mine, saved, picture, list)
+        store.prune(alice.pubkey, keep = 2)
+        assertNull(store.event(old[0].id))
+        assertNull(store.event(old[1].id))
+        assertNull(store.event(picture.id))
+        assertNotNull(store.event(old[2].id))
+        assertNotNull(store.event(mine.id))
+        assertNotNull(store.event(saved.id))
+        assertTrue(store.searchNotes("bob", 10).none { it.id == old[0].id })
+    }
+
+    @Test
+    fun pruningKeepsRecentPostsByPeopleYouFollow() {
+        val now = System.currentTimeMillis() / 1000
+        val carol = LocalSigner(Keys.generate())
+        val dave = LocalSigner(Keys.generate())
+        val followed = event(bob, Kind.NOTE, now - 10 * 86400, "followed")
+        val ancient = event(bob, Kind.NOTE, now - 200 * 86400, "ancient")
+        val stranger = event(dave, Kind.NOTE, now - 9 * 86400, "stranger")
+        insert(followed, ancient, stranger, event(carol, Kind.NOTE, now - 5 * 86400), event(carol, Kind.NOTE, now - 86400))
+        store.setFollows(listOf(bob.pubkey))
+        store.prune(alice.pubkey, keep = 1)
+        assertNotNull(store.event(followed.id))
+        assertNull(store.event(ancient.id))
+        assertNull(store.event(stranger.id))
+    }
 }

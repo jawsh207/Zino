@@ -124,6 +124,9 @@ class RelayPool(
 
     val isVisible: Boolean get() = visible.get() > 0
 
+    /** True if any relay connection is open right now, which means the phone is online. */
+    val anyLive: Boolean get() = relays.values.any { it.live }
+
     /** The connection for a relay, made the first time it's needed. */
     private fun relay(url: String) = relays.getOrPut(url) { Relay(url) }
 

@@ -155,9 +155,14 @@ object Http {
             return file
         }
         dir.mkdirs()
-        val temp = File(dir, "$name.tmp")
-        temp.writeBytes(bytes(url))
-        temp.renameTo(file)
+        // A temp file of its own, so two downloads of the same picture can't write into one file.
+        val temp = File.createTempFile(name, ".tmp", dir)
+        try {
+            temp.writeBytes(bytes(url))
+            if (!temp.renameTo(file) && !file.exists()) throw java.io.IOException("could not save $name")
+        } finally {
+            temp.delete()
+        }
         return file
     }
 

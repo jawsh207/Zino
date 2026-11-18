@@ -722,21 +722,36 @@ class Store(context: Context, name: String = "struthio.db") : SQLiteOpenHelper(c
     /** Gives up on events waiting since before [time]; returns how many were dropped. */
     fun dropOutgoingBefore(time: Long): Int = writableDatabase.delete("outbox", "added_at < ?", arrayOf(time.toString()))
 
-    /** Keeps the cache bounded: only ordinary events by people not followed are dropped. */
-    fun prune(me: String?, keep: Int) {
+    /**
+     * Keeps the cache bounded. Past the newest [keep] events, ordinary events are dropped: posts,
+     * pictures, videos, reactions, boosts and zap receipts. Your own events, your bookmarks,
+     * deletions, and profiles and lists (which replace themselves) always stay. Posts by people you
+     * follow stay for [followDays] days, then go too, so the cache can't grow without end.
+     */
+    fun prune(me: String?, keep: Int, followDays: Int = 90) {
         val db = writableDatabase
         val cutoff = db.rawQuery(
             "SELECT created_at FROM events ORDER BY created_at DESC LIMIT 1 OFFSET ?",
             arrayOf(keep.toString()),
         ).use { if (it.moveToFirst()) it.getLong(0) else return }
-        val condition = """created_at < ? AND kind IN (1,6,7,16,1111) AND pubkey != ?
-            AND pubkey NOT IN (SELECT pubkey FROM follows)"""
-        val args = arrayOf(cutoff.toString(), me ?: "")
+        val followCutoff = minOf(cutoff, System.currentTimeMillis() / 1000 - followDays * 86400L)
+        val bookmarks = me?.let { latest(it, Kind.BOOKMARKS) }?.tags?.values("e")?.filter(Hex::isKey)?.take(500).orEmpty()
+        val keepMarks = if (bookmarks.isEmpty()) "" else "AND id NOT IN (${bookmarks.joinToString(",") { "?" }})"
+        // Regular events only: kinds 0 and 3 replace themselves, and deletions must stay to keep
+        // deleted posts from coming back.
+        val condition = """created_at < ? AND kind < 10000 AND kind NOT IN (0, 3, 5) AND pubkey != ? $keepMarks
+            AND (created_at < ? OR pubkey NOT IN (SELECT pubkey FROM follows))"""
+        val args = (listOf(cutoff.toString(), me ?: "") + bookmarks + followCutoff.toString()).toTypedArray()
         db.beginTransaction()
         try {
             db.execSQL("DELETE FROM notes_fts WHERE docid IN (SELECT rowid FROM events WHERE kind=1 AND $condition)", args)
             db.execSQL("DELETE FROM refs WHERE id IN (SELECT id FROM events WHERE $condition)", args)
             db.execSQL("DELETE FROM events WHERE $condition", args)
+            // Zap totals for posts that are gone aren't needed; zaps to or from you stay.
+            db.execSQL(
+                "DELETE FROM zaps WHERE created_at < ? AND recipient != ? AND sender != ? AND target NOT IN (SELECT id FROM events)",
+                arrayOf(cutoff.toString(), me ?: "", me ?: ""),
+            )
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()

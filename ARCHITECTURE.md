@@ -72,6 +72,8 @@ Each account on the phone has its own database, settings and secrets files (`dat
 - `outbox`: signed events waiting for a connection
 - `reads`: what you've already seen, for unread markers
 
+The cache is pruned at start past the newest 20,000 events: ordinary events from people you don't follow go first, and posts by people you follow go after 90 days. Your own events, bookmarks, deletions, profiles and lists always stay.
+
 Deletions (NIP-09) remove the events they point at, but only when the author matches. A deletion that arrives first also stops the deleted event from being stored later.
 
 Secrets, like your private key and wallet link, are not in the database. `data/Secure.kt` encrypts them with a key kept in Android's hardware Keystore.
@@ -111,7 +113,7 @@ When a post, reaction, vote or message can't reach any relay for now, `Core.publ
 - every two minutes while the app is open and something is waiting,
 - and during each background notification check.
 
-It stops at the first event that still can't go. Events that relays refuse outright are dropped, and so is anything still unsent after three days. The exact same signed event is sent each time, so a relay that got an earlier try keeps only one copy.
+If an event still can't go and no relay is connected, it stops there, since the phone is likely offline. If other relays are connected, only that event waits and the rest go ahead. Events that relays refuse outright are dropped, and so is anything still unsent after three days. The exact same signed event is sent each time, so a relay that got an earlier try keeps only one copy.
 
 ## Private messages
 

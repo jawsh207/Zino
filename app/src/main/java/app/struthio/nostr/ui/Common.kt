@@ -144,6 +144,9 @@ private object Images {
                 } catch (e: IOException) {
                     failed[name] = SystemClock.elapsedRealtime()
                     throw e
+                } finally {
+                    // Done with this picture; anyone still waiting finds the file on disk.
+                    fetching.remove(name)
                 }
             }
         }
