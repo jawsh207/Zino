@@ -44,14 +44,15 @@ Each account on the phone has its own database, settings and secrets files (`dat
 - **Subscriptions.** A `Subscription` asks some relays for events matching some filters. Requests go out one at a time and only a few stay open per relay, because relays limit both.
 - **Posting.** `publish` sends an event to a set of relays and collects each one's answer.
 - **Sign-in (NIP-42).** Only when a relay demands it. Requests waiting on sign-in are sent again once it succeeds.
-- **Failing relays rest.** A relay that keeps failing, refuses us or rate-limits us is left alone for a while, so a dead relay doesn't slow everything down. A failure while the phone has no network doesn't count against any relay.
+- **Failing relays rest.** A relay that keeps failing, refuses us or rate-limits us is left alone for a while, so a dead relay doesn't slow everything down. A failure while the phone has no network doesn't count against any relay. A relay that answers with an HTTP error (a 503, say) keeps its pause through a network change, since its server was reached. One that turns us away, isn't a relay at all, has a name that no longer exists, or gives server errors try after try rests for half an hour, then twice as long each time after that, up to a day. Those rests are kept in `net/RelayStats.kt`, so they survive a restart, and end once the relay lets us in, including from a relay screen check. After a failed try, a relay isn't dialled again for a few seconds, however many requests want it.
+- **Relays that won't take posts.** A relay that refuses a post with `restricted:`, or with `blocked:` and a reason like payment or writes being off, isn't sent more posts for half an hour. Posts to it fail at once with what it said. Our relay list (kind 10002) goes only to the inboxes of tagged people that took the post.
 - **Reconnects** ask only for what's newer than what the relay already sent.
 - **Checking the network on return.** Android can hold back network news while the app sits frozen in the background, so on coming to the front (and on pull to refresh) `Core.checkNetwork` asks Android directly and tells the relays, rather than trusting what they last heard.
 - **Relays that can't do something** aren't asked again that session: one that answers COUNT with a notice about an unknown command, or that says it accepts no requests at all (a write-only relay).
 - **Data use and uptime** per relay are counted in `net/RelayStats.kt` and shown on the relay screens.
 - **Not now or no?** When a post fails, `PublishResult.retryable` says whether trying later could help: no relay answered, the connection dropped, or the answers were "rate-limited:" or "error:" (NIP-01). An outright refusal like "blocked:" is shown as an error instead.
 
-- **Comparing lists (NIP-77).** `RelayPool.missing` runs negentropy (`core/Negentropy.kt`) with one relay: the two sides trade fingerprints of ranges of events until each knows what the other lacks, without sending the events. It returns the ids Zino is missing, or null if the relay doesn't support it, so the caller can fall back to a plain REQ. Many relays run software that can do this but have it turned off; they answer with a notice, which ends the run at once. Notices from relays are kept in the relay's problem list.
+- **Comparing lists (NIP-77).** `RelayPool.missing` runs negentropy (`core/Negentropy.kt`) with one relay: the two sides trade fingerprints of ranges of events until each knows what the other lacks, without sending the events. It returns the ids Zino is missing, or null if the relay doesn't support it, so the caller can fall back to a plain REQ. Many relays run software that can do this but have it turned off; they answer with a notice, which ends the run at once. That relay is then remembered in `net/RelayStats.kt` for a week and not asked again, so it gets a plain REQ straight away. Notices from relays are kept in the relay's problem list.
 
 `net/WebSocket.kt` is Zino's own WebSocket client (TLS, handshake, frames), so no networking library is needed. The only libraries Zino uses beyond Compose are libsecp256k1, for keys and signatures, and ZXing, for QR codes.
 
@@ -93,7 +94,7 @@ A feed says "Nothing here yet" only after its relays have answered (or 10 second
 
 New posts that arrive while you're scrolled down wait behind the "new posts" pill in `ui/Home.kt`.
 
-Trending counts reactions and boosts from the last day. With the trusted network setting on, Global and Trending only show people you follow and the people they follow.
+Trending counts reactions and boosts from the last day. With the trusted network setting on, Global and Trending only show people you follow and the people they follow. That network is worked out once a day from the follow lists of the people you follow. Those lists are heavy, so they're asked from the lookup relays first, and from general relays only for the lists the lookup relays didn't have.
 
 ## Posts
 
@@ -106,6 +107,8 @@ The rules for reading a post are in `core/`:
 Pictures in a post show as a grid (`ImageGrid` in `ui/Note.kt`): one on its own, two side by side, three as one large and two small, four or more two by two, with a "+N" tile in feeds. Links with no file ending and a long hash-like name, as Blossom servers give, are checked once for their type when link previews are on, and shown as pictures if they are.
 
 The screens that draw posts are `ui/Note.kt` (every post card), `ui/Thread.kt` (a post and its replies), `ui/Article.kt`, `ui/Poll.kt`, `ui/Invoice.kt`, `ui/Embed.kt` and `ui/Viewer.kt`.
+
+Videos play in `NetVideoView` (`ui/Viewer.kt`): Android's `MediaPlayer` drawn on a `TextureView`, with the platform's controls. It isn't `VideoView`, which resets its player on the main thread when a video scrolls away. That reset waits for the media server to drop its connection, and on a bad network that waits behind a stuck name lookup, long enough for Android to close the app as not responding. Opening the address, attaching the picture and the final release all run on a thread of each video's own.
 
 ## Sending without a connection
 

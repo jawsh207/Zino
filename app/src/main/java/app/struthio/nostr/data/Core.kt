@@ -1107,9 +1107,10 @@ class Core(
     private suspend fun reachTagged(event: Event, tagged: List<String>, sent: Set<String>) {
         ensureRelayLists(tagged)
         val inboxes = (tagged.flatMap { relaysOf(it)?.read.orEmpty().take(3) }.toSet() - sent).take(MAX_PUBLISH_RELAYS).toSet()
-        pool.publish(event, inboxes)
-        // NIP-65: help whoever reads this find us.
-        if (event.kind != Kind.RELAYS) store.latest(event.pubkey, Kind.RELAYS)?.let { pool.publish(it, inboxes) }
+        val took = pool.publish(event, inboxes).filterValues { it.ok }.keys
+        // NIP-65: help whoever reads this find us. Only where the post went in: a relay that just
+        // refused it, or couldn't be reached, would only refuse or fail again.
+        if (event.kind != Kind.RELAYS && took.isNotEmpty()) store.latest(event.pubkey, Kind.RELAYS)?.let { pool.publish(it, took) }
     }
 
     /** Shows [change] on a note at once. The real counts follow, which undoes it if sending failed. */
@@ -1934,7 +1935,10 @@ class Core(
     /** The people currently in your trusted network. */
     fun trustedNow(): Set<String> = trustedSet.value
 
-    /** Reads what the people you follow follow, keeps only the result, and does so once a day. */
+    /**
+     * Reads what the people you follow follow, keeps only the result, and does so once a day. Asks
+     * lookup relays first and general relays only for the lists those lacked.
+     */
     private suspend fun refreshTrustedNetwork() {
         val pubkey = me ?: return
         val mine = follows.value
@@ -1942,14 +1946,21 @@ class Core(
         val now = nowSeconds()
         if (now - prefs.getLong("trusted_at", 0L) < 86400 && trustedSet.value.isNotEmpty()) return
         val lists = HashMap<String, Event>()
+        val keep: (Event, String) -> Unit = { e, _ -> synchronized(lists) { if ((lists[e.pubkey]?.createdAt ?: 0) < e.createdAt) lists[e.pubkey] = e } }
+        // Follow lists are heavy, and every follow's at once is megabytes: enough for general relays
+        // such as Damus to rate-limit us at start-up. Lookup relays are made for this, so they're
+        // asked first, and the others only for lists they didn't have.
         for (chunk in mine.toList().chunked(MAX_AUTHORS)) {
+            pool.query(lookupRelays().toSet(), listOf(Filter(authors = chunk, kinds = listOf(Kind.FOLLOWS))), 10_000, onEvent = keep)
+        }
+        val unfound = mine.filter { synchronized(lists) { it !in lists } }
+        for (chunk in unfound.chunked(MAX_AUTHORS)) {
             pool.query(
-                (lookupRelays() + DEFAULT_RELAYS).toSet() + readRelays().take(2),
+                DEFAULT_RELAYS.toSet() + readRelays().take(2),
                 listOf(Filter(authors = chunk, kinds = listOf(Kind.FOLLOWS))),
                 10_000,
-            ) { e, _ ->
-                synchronized(lists) { if ((lists[e.pubkey]?.createdAt ?: 0) < e.createdAt) lists[e.pubkey] = e }
-            }
+                onEvent = keep,
+            )
         }
         val theirs = synchronized(lists) { lists.values.map { it.tags.values("p").filter(Hex::isKey) } }
         if (theirs.isEmpty()) return

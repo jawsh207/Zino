@@ -191,6 +191,39 @@ class RelayRefusalTest {
     }
 }
 
+/** A relay that said it can't compare lists isn't asked to again, even after a restart. */
+class NegentropyMemoryTest {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @After
+    fun tearDown() = scope.cancel()
+
+    @Test
+    fun aDisabledRelayIsNotAskedAgain() = runBlocking {
+        val asked = java.util.concurrent.atomic.AtomicInteger()
+        val relay = FakeRelay(onOther = { m, send ->
+            if (m.getString(0) == "NEG-OPEN") {
+                asked.incrementAndGet()
+                send("""["NOTICE","ERROR: bad msg: negentropy disabled"]""")
+            }
+        })
+        var saved: String? = null
+        val stats = RelayStats(load = { null }, save = { saved = it })
+        val filter = Filter(kinds = listOf(Kind.NOTE))
+        val pool = RelayPool(scope, stats) { null }.apply { activityStarted() }
+        assertEquals(null, pool.missing(relay.url, filter, emptyList(), timeoutMs = 5000))
+        assertEquals(null, pool.missing(relay.url, filter, emptyList(), timeoutMs = 5000))
+        stats.flush()
+        val later = RelayPool(scope, RelayStats(load = { saved }, save = {})) { null }.apply { activityStarted() }
+        val started = System.currentTimeMillis()
+        assertEquals(null, later.missing(relay.url, filter, emptyList(), timeoutMs = 5000))
+        assertTrue(System.currentTimeMillis() - started < 1000)
+        delay(200)
+        assertEquals(1, asked.get())
+        relay.close()
+    }
+}
+
 /** What a failed post tells Core: whether keeping it and trying later can help. */
 class PublishRetryTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -223,6 +256,31 @@ class PublishRetryTest {
         assertFalse(result.ok)
         assertFalse(result.retryable)
         assertEquals("blocked: not on the list", result.message)
+        relay.close()
+    }
+
+    @Test
+    fun aPaidRelayIsNotSentMorePosts() = runBlocking {
+        val sent = java.util.concurrent.atomic.AtomicInteger()
+        val relay = FakeRelay(onOther = { m, send ->
+            if (m.getString(0) == "EVENT") {
+                sent.incrementAndGet()
+                send("""["OK","${m.getJSONObject(1).getString("id")}",false,"restricted: Pay on the site for access."]""")
+            }
+        })
+        assertFalse(pool.publishFirst(note(), setOf(relay.url), timeoutMs = 3000).ok)
+        val second = pool.publish(note(), setOf(relay.url), timeoutMs = 3000).getValue(relay.url)
+        assertFalse(second.ok)
+        assertEquals("restricted: Pay on the site for access.", second.message)
+        assertEquals(1, sent.get())
+        relay.close()
+    }
+
+    @Test
+    fun oneBlockedEventDoesNotStopTheNext() = runBlocking {
+        val relay = answering(false, "blocked: spam")
+        pool.publishFirst(note(), setOf(relay.url), timeoutMs = 3000)
+        assertEquals("blocked: spam", pool.publish(note(), setOf(relay.url), timeoutMs = 3000).getValue(relay.url).message)
         relay.close()
     }
 

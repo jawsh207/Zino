@@ -2,7 +2,9 @@
  * Talking to relays (NIP-01). One connection per relay, opened only while something needs it and
  * the app is in front. Subscriptions are spread over the right relays, events are checked before
  * use, posts are sent and their answers collected, sign-in (NIP-42) is handled, and failing relays
- * rest for a while before being tried again.
+ * rest for a while before being tried again. Relays that keep turning us away rest longer each
+ * time, and that survives a restart; relays that refuse our posts outright aren't sent more for a
+ * while.
  */
 package app.struthio.nostr.net
 
@@ -218,6 +220,9 @@ class RelayPool(
             url,
             onOpen = {
                 stats?.attempt(url, true)
+                // It let us in after all, so a long rest from earlier failures no longer applies.
+                stats?.reached(url)
+                relays[url]?.forgive()
                 sentAt = System.currentTimeMillis()
                 if (!ws.send("[\"REQ\",${quoteJson(id)},${filter.toJson()}]")) answer.complete(null)
             },
@@ -470,9 +475,28 @@ class RelayPool(
         // Set when this relay said it doesn't support COUNT (NIP-45).
         @Volatile private var noCount = false
 
+        // Set when this relay said it can't compare lists (NIP-77); remembered across restarts.
+        @Volatile private var noNegentropy = stats?.noNegentropy(url) == true
+
+        // Until when this relay won't take our posts, and what it said: paid and read-only relays.
+        @Volatile private var writesRefusedUntil = 0L
+        @Volatile private var writeRefusal = ""
+
+        // No new dial before this, so a burst of requests after a failure doesn't redial at once.
+        private var nextDialAt = 0L
+
         // Set when this relay said it takes no requests at all, as write-only relays do.
         @Volatile private var readsRefused = false
         private var retryJob: Job? = null
+
+        init {
+            // A long rest from an earlier run still holds, so a dead relay isn't dialled at every start.
+            val rest = stats?.restingUntil(url) ?: 0L
+            if (rest > System.currentTimeMillis()) {
+                failedUntil = rest
+                limitedUntil = rest
+            }
+        }
 
         /**
          * Adds a subscription and sends it once there's room. A resting relay answers straight away
@@ -558,7 +582,8 @@ class RelayPool(
         /** Starts a negentropy run, sent once connected; a resting relay fails it at once. */
         fun negOpen(id: String, request: String, onMessage: (String?) -> Unit) {
             val send = synchronized(lock) {
-                if (cooling()) {
+                // A relay that said it can't compare lists answers with a plain REQ instead, unasked.
+                if (cooling() || noNegentropy) {
                     null
                 } else {
                     negs[id] = request to onMessage
@@ -603,6 +628,10 @@ class RelayPool(
                     deferred.complete(PublishResult(false, PublishResult.RESTING))
                     return deferred
                 }
+                if (System.currentTimeMillis() < writesRefusedUntil) {
+                    deferred.complete(PublishResult(false, writeRefusal))
+                    return deferred
+                }
                 pending[event.id] = Pending(event, deferred)
                 idleJob?.cancel()
                 ensureConnected()
@@ -639,7 +668,7 @@ class RelayPool(
         private fun ensureConnected() {
             if (socket != null || !foreground || !onlineState.value) return
             // A paused relay, after failures or a refusal, isn't dialled early because a feed wants it.
-            val wait = maxOf(failedUntil, limitedUntil) - System.currentTimeMillis()
+            val wait = maxOf(failedUntil, limitedUntil, nextDialAt) - System.currentTimeMillis()
             if (wait > 50) {
                 if (retryJob?.isActive != true) retryLater(wait)
                 return
@@ -666,6 +695,7 @@ class RelayPool(
         private fun opened() {
             AppLog.add("$url connected")
             stats?.attempt(url, true)
+            stats?.reached(url)
             synchronized(problems) { problems[url]?.removeAll { it.startsWith("connection:") } }
             val requests = synchronized(lock) {
                 open = true
@@ -748,20 +778,35 @@ class RelayPool(
                 if (lasted || offline || replaced) failures = 0 else failures++
                 val wait = minOf(MAX_BACKOFF_S, 2L shl minOf(failures, 8)) * 1000 + (0L until 1000L).random()
                 if (!lasted && failures >= 2) failedUntil = now + wait
+                // A try that failed before connecting isn't repeated straight away by the next request.
+                if (!open && error != null && !offline && !replaced) nextDialAt = now + MIN_REDIAL_MS
+                val message = error?.message.orEmpty()
+                // An HTTP answer, even an error, means the relay's server was reached: a new network
+                // won't help, so its pause goes where a network change leaves it alone.
+                val serverAnswered = message.startsWith("handshake refused: HTTP/")
+                if (serverAnswered && !lasted && failures >= 2) limitedUntil = maxOf(limitedUntil, failedUntil)
                 // A relay turning us away, as members-only relays do, won't change its mind soon. Nor will
                 // an address that answers as a web page or redirects (200, 301): it isn't a relay at all.
-                val message = error?.message.orEmpty()
+                // These rests get longer each time and are kept across restarts.
                 val notARelay = message.startsWith("handshake refused: HTTP/1.1 2") || message.startsWith("handshake refused: HTTP/1.1 3")
                 if (notARelay || (message.startsWith("handshake refused: HTTP/1.1 4") && " 429" !in message)) {
-                    failedUntil = now + REFUSED_MS
-                    limitedUntil = now + REFUSED_MS
+                    val until = stats?.restLonger(url, REFUSED_MS) ?: (now + REFUSED_MS)
+                    failedUntil = until
+                    limitedUntil = until
                 }
                 // A name that doesn't exist, while other relays are reachable, is a relay that's gone:
                 // it won't come back on another network either. Telling the two apart needs another
                 // relay open, so a network whose name lookups fail doesn't pause every relay.
                 if (!lasted && failures >= 2 && error is java.net.UnknownHostException && relays.values.any { it !== this && it.live }) {
-                    failedUntil = now + REFUSED_MS
-                    limitedUntil = now + REFUSED_MS
+                    val until = stats?.restLonger(url, REFUSED_MS) ?: (now + REFUSED_MS)
+                    failedUntil = until
+                    limitedUntil = until
+                } else if (!lasted && failures >= DEAD_AFTER && serverAnswered) {
+                    // Server errors (503, 530) try after try: the relay is down, whatever the network.
+                    val until = stats?.restLonger(url, REFUSED_MS) ?: (now + REFUSED_MS)
+                    failedUntil = until
+                    limitedUntil = until
+                    failures = 0
                 } else if (!lasted && failures >= DEAD_AFTER) {
                     // Unreachable try after try: rest it longer, though a new network still clears this.
                     failedUntil = now + REFUSED_MS
@@ -811,6 +856,27 @@ class RelayPool(
             old?.close()
         }
 
+        /**
+         * True if a refused post means this relay won't take posts from us at all for now (a paid
+         * or read-only relay), rather than objecting to this one event (NIP-01 prefixes).
+         */
+        private fun refusesWrites(message: String): Boolean {
+            val m = message.lowercase()
+            if (m.startsWith("restricted:")) return true
+            return m.startsWith("blocked:") && listOf("pay", "disabled", "whitelist", "allowlist", "member", "not allowed").any { it in m }
+        }
+
+        /** Ends any rest: the relay was just reached on a connection of its own. */
+        fun forgive() {
+            synchronized(lock) {
+                failures = 0
+                failedUntil = 0
+                nextDialAt = 0
+                // A rate limit is the relay asking for quiet, which connecting says nothing about.
+                if (limitedUntil > System.currentTimeMillis() + RATE_LIMIT_PAUSE_MS) limitedUntil = 0
+            }
+        }
+
         /** Reconnects after a network change if anything needs this relay. */
         fun wake() {
             // Pauses stay: a network change, which does say something, is reported on its own.
@@ -847,6 +913,11 @@ class RelayPool(
                     if (text.contains("NEG-", ignoreCase = true) || text.contains("negentropy", ignoreCase = true) ||
                         text.contains("unknown cmd", ignoreCase = true)
                     ) {
+                        // "unknown cmd" alone could be about something else, so only a named refusal is kept.
+                        if (text.contains("NEG-", ignoreCase = true) || text.contains("negentropy", ignoreCase = true)) {
+                            if (!noNegentropy) stats?.refuseNegentropy(url)
+                            noNegentropy = true
+                        }
                         val failed = synchronized(lock) { negs.values.map { it.second }.also { negs.clear() } }
                         failed.forEach { it(null) }
                     }
@@ -931,6 +1002,10 @@ class RelayPool(
             }
             synchronized(lock) { pending.remove(id) }
             if (!accepted) AppLog.add("$url refused kind ${item.event.kind}: $message")
+            if (!accepted && refusesWrites(message)) {
+                writeRefusal = message
+                writesRefusedUntil = System.currentTimeMillis() + REFUSED_MS
+            }
             item.result.complete(PublishResult(accepted, message))
         }
 
@@ -1008,6 +1083,7 @@ class RelayPool(
         const val STABLE_MS = 30_000L
         const val RATE_LIMIT_PAUSE_MS = 300_000L
         const val REFUSED_MS = 30 * 60 * 1000L
+        const val MIN_REDIAL_MS = 3_000L
         const val MAX_OPEN_SUBS = 12
         const val REQ_SPACING_MS = 120L
     }

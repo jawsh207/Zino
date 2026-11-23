@@ -1,16 +1,27 @@
 /*
  * Media in posts: the full-screen picture viewer with pinch to zoom, the video player, and link
- * preview cards.
+ * preview cards. The video player is our own rather than Android's VideoView: VideoView resets
+ * its player on the main thread when it leaves the screen, and on a bad network that reset waits
+ * for a stuck name lookup and freezes the app until Android closes it.
  */
 package app.struthio.nostr.ui
 
 import app.struthio.nostr.str
 import app.struthio.nostr.R
+import android.content.Context
 import android.content.Intent
+import android.graphics.Matrix
+import android.graphics.SurfaceTexture
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
+import android.view.Surface
+import android.view.TextureView
+import android.widget.FrameLayout
 import android.widget.MediaController
-import android.widget.VideoView
+import java.util.concurrent.Executors
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -138,7 +149,7 @@ fun ImageViewer(urls: List<String>, start: Int, onClose: () -> Unit) {
 }
 
 /**
- * Tap to play with the platform's own player. Before that the card shows the note's thumbnail,
+ * Tap to play with the platform's media player. Before that the card shows the note's thumbnail,
  * or, with link previews on, a still taken from the start of the video.
  */
 @Composable
@@ -168,27 +179,13 @@ fun VideoCard(url: String, thumbnail: String? = null, aspect: Float = 16f / 9f, 
             playing -> {
                 AndroidView(
                     factory = {
-                        VideoView(it).apply {
-                            // Claims the tap that shows the controls, so the note doesn't open its comments too.
-                            isClickable = true
-                            setMediaController(MediaController(it).also { controller -> controller.setAnchorView(this) })
-                            setOnPreparedListener { loading = false }
-                            setOnInfoListener { _, what, _ ->
-                                when (what) {
-                                    MediaPlayer.MEDIA_INFO_BUFFERING_START -> loading = true
-                                    MediaPlayer.MEDIA_INFO_BUFFERING_END, MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START -> loading = false
-                                }
-                                false
-                            }
-                            setOnErrorListener { _, _, _ ->
-                                failed = true
-                                true
-                            }
-                            setVideoURI(Uri.parse(url))
-                            start()
+                        NetVideoView(it, url).apply {
+                            onReady = { loading = false }
+                            onBuffering = { buffering -> loading = buffering }
+                            onFailed = { failed = true }
                         }
                     },
-                    onRelease = { it.stopPlayback() },
+                    onRelease = { it.release() },
                     modifier = Modifier.fillMaxSize(),
                 )
                 if (loading) CircularProgressIndicator(color = Color.White)
@@ -277,4 +274,179 @@ fun LinkPreview(url: String) {
             }
         }
     }
+}
+
+/**
+ * A video from the network, drawn on a TextureView, with the platform's playback controls.
+ * Everything that may wait on the network (opening the address, attaching the picture, and the
+ * final release) runs on a thread of its own. MediaPlayer.reset and release on the main thread
+ * wait for the media server to close its HTTP connection, which waits in turn for whatever read
+ * is under way, including a name lookup that can hang for many seconds.
+ */
+private class NetVideoView(context: Context, url: String) :
+    FrameLayout(context), TextureView.SurfaceTextureListener, MediaController.MediaPlayerControl {
+    /** Called once the video can play. */
+    var onReady: () -> Unit = {}
+
+    /** Called with true while the video waits for more data, then false. */
+    var onBuffering: (Boolean) -> Unit = {}
+
+    /** Called when the video can't be played here. */
+    var onFailed: () -> Unit = {}
+
+    // One thread per video: a release stuck behind a hung lookup mustn't hold up the next video.
+    private val worker = Executors.newSingleThreadExecutor { Thread(it, "video") }
+
+    // Made here, on the main thread, so its callbacks arrive on the main thread.
+    private val player = MediaPlayer()
+    private val texture = TextureView(context)
+    private val controller = MediaController(context)
+    private val audio = context.getSystemService(AudioManager::class.java)
+    private val attributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+        .build()
+    private val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(attributes)
+        .setOnAudioFocusChangeListener { change -> if (change < 0 && isPlaying()) pause() }
+        .build()
+    private var surface: Surface? = null
+    private var prepared = false
+    private var released = false
+    private var buffered = 0
+    private var videoWidth = 0
+    private var videoHeight = 0
+
+    init {
+        addView(texture, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        texture.surfaceTextureListener = this
+        // Claims the tap that shows the controls, so the note doesn't open its comments too.
+        isClickable = true
+        setOnClickListener { if (prepared && !released) controller.show() }
+        controller.setMediaPlayer(this)
+        controller.setAnchorView(this)
+        player.setAudioAttributes(attributes)
+        player.setOnPreparedListener {
+            if (released) return@setOnPreparedListener
+            prepared = true
+            onReady()
+            start()
+            controller.show()
+        }
+        player.setOnInfoListener { _, what, _ ->
+            when (what) {
+                MediaPlayer.MEDIA_INFO_BUFFERING_START -> onBuffering(true)
+                MediaPlayer.MEDIA_INFO_BUFFERING_END, MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START -> onBuffering(false)
+            }
+            false
+        }
+        player.setOnBufferingUpdateListener { _, percent -> buffered = percent }
+        player.setOnVideoSizeChangedListener { _, w, h ->
+            videoWidth = w
+            videoHeight = h
+            fit()
+        }
+        player.setOnErrorListener { _, _, _ ->
+            if (!released) onFailed()
+            true
+        }
+        player.setOnCompletionListener { controller.show(0) }
+        texture.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fit() }
+        worker.execute {
+            try {
+                player.setDataSource(context, Uri.parse(url))
+                player.prepareAsync()
+            } catch (e: Exception) {
+                post { if (!released) onFailed() }
+            }
+        }
+    }
+
+    /** Scales the picture to fit inside the card without stretching it, like VideoView did. */
+    private fun fit() {
+        val w = texture.width.toFloat()
+        val h = texture.height.toFloat()
+        if (w == 0f || h == 0f || videoWidth == 0 || videoHeight == 0) return
+        val scale = minOf(w / videoWidth, h / videoHeight)
+        texture.setTransform(Matrix().apply { setScale(videoWidth * scale / w, videoHeight * scale / h, w / 2, h / 2) })
+    }
+
+    /** Hands the picture's surface to the player once Android has made it. */
+    override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
+        if (released) return
+        val made = Surface(texture)
+        surface = made
+        worker.execute { runCatching { player.setSurface(made) } }
+    }
+
+    /** Nothing to do: the picture is scaled again when the layout changes. */
+    override fun onSurfaceTextureSizeChanged(texture: SurfaceTexture, width: Int, height: Int) = Unit
+
+    /**
+     * Keeps the texture alive after the view leaves the screen (false), because the player may
+     * still be drawing into it until [release] finishes on the worker thread, which frees it.
+     */
+    override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean = false
+
+    /** Nothing to do for each new frame. */
+    override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
+
+    /**
+     * Stops the video and frees the player, off the main thread so a slow network can't freeze
+     * the app. Safe to call more than once.
+     */
+    fun release() {
+        if (released) return
+        released = true
+        controller.hide()
+        audio?.abandonAudioFocusRequest(focus)
+        val made = surface
+        val drawnOn = texture.surfaceTexture
+        worker.execute {
+            runCatching { player.release() }
+            made?.release()
+            drawnOn?.release()
+        }
+        worker.shutdown()
+    }
+
+    /** Plays, after asking for the sound, as any media app should. */
+    override fun start() {
+        if (!prepared || released) return
+        audio?.requestAudioFocus(focus)
+        player.start()
+    }
+
+    /** Pauses. */
+    override fun pause() {
+        if (prepared && !released) player.pause()
+    }
+
+    /** The video's length in ms, or -1 before it's known. */
+    override fun getDuration(): Int = if (prepared && !released) player.duration else -1
+
+    /** How far in the video is, in ms. */
+    override fun getCurrentPosition(): Int = if (prepared && !released) player.currentPosition else 0
+
+    /** Moves to [pos] ms. The player seeks on its own threads, so this doesn't wait. */
+    override fun seekTo(pos: Int) {
+        if (prepared && !released) player.seekTo(pos)
+    }
+
+    /** True if the video is playing now. */
+    override fun isPlaying(): Boolean = prepared && !released && player.isPlaying
+
+    /** How much of the video has downloaded, in percent. */
+    override fun getBufferPercentage(): Int = buffered
+
+    /** True: any network video can be paused. */
+    override fun canPause() = true
+
+    /** True: the controls may seek back. */
+    override fun canSeekBackward() = true
+
+    /** True: the controls may seek forward. */
+    override fun canSeekForward() = true
+
+    /** The player's audio session. */
+    override fun getAudioSessionId(): Int = if (released) 0 else player.audioSessionId
 }

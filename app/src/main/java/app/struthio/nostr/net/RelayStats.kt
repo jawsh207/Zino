@@ -1,6 +1,7 @@
 /*
  * Per-relay figures for the relay screens: data used and how often each relay answered, over the
- * last few days.
+ * last few days. Also kept here, so they survive the app being closed: how long a relay that keeps
+ * turning us away should be left alone, and which relays said they can't compare lists (NIP-77).
  */
 package app.struthio.nostr.net
 
@@ -30,8 +31,51 @@ class RelayStats(load: () -> String?, private val save: (String) -> Unit) {
     private var dirty = false
     private var savedAt = System.currentTimeMillis()
 
+    /** Per relay: until when it rests (ms), and how many long rests in a row it has had. */
+    private val rests = HashMap<String, Pair<Long, Int>>()
+
+    /** Per relay: when it said it doesn't do negentropy (ms). */
+    private val noSync = HashMap<String, Long>()
+
     init {
         runCatching { load()?.let(::parse) }
+    }
+
+    /** Until when [url] should be left alone (ms since 1970), or 0. */
+    fun restingUntil(url: String): Long = synchronized(lock) { rests[url]?.first ?: 0L }
+
+    /**
+     * Rests [url] after it turned us away again, starting at [base] ms and doubling with each rest
+     * in a row, up to a day: a relay that's been gone for weeks shouldn't be dialled every half hour.
+     * Returns until when.
+     */
+    fun restLonger(url: String, base: Long): Long = synchronized(lock) {
+        val streak = rests[url]?.second ?: 0
+        val until = System.currentTimeMillis() + minOf(base shl minOf(streak, 6), MAX_REST_MS)
+        rests[url] = until to streak + 1
+        dirty = true
+        until
+    }
+
+    /** [url] let us in, so any rest and its streak are forgotten. */
+    fun reached(url: String) {
+        synchronized(lock) { if (rests.remove(url) != null) dirty = true }
+    }
+
+    /**
+     * True if [url] said lately that it can't compare lists. Asked again after a week, as relays
+     * do add it.
+     */
+    fun noNegentropy(url: String): Boolean = synchronized(lock) {
+        (noSync[url] ?: return false) > System.currentTimeMillis() - NO_SYNC_KEEP_MS
+    }
+
+    /** Notes that [url] can't compare lists (NIP-77). */
+    fun refuseNegentropy(url: String) {
+        synchronized(lock) {
+            noSync[url] = System.currentTimeMillis()
+            dirty = true
+        }
     }
 
     /** Today, counted in days since 1970. */
@@ -83,6 +127,10 @@ class RelayStats(load: () -> String?, private val save: (String) -> Unit) {
                     days.tailMap(oldest).forEach { (day, d) -> list.put(JSONArray(listOf(day, d.tries, d.reached, d.down, d.up))) }
                     if (list.length() > 0) put(url, list)
                 }
+                val now = System.currentTimeMillis()
+                // Underscored keys can't be relay addresses, and older versions skip what isn't a list.
+                put(REST_KEY, JSONObject().apply { rests.forEach { (url, r) -> if (r.first > now - MAX_REST_MS) put(url, JSONArray(listOf(r.first, r.second))) } })
+                put(NO_SYNC_KEY, JSONObject().apply { noSync.forEach { (url, at) -> if (at > now - NO_SYNC_KEEP_MS) put(url, at) } })
             }.toString()
         }
         save(text)
@@ -91,7 +139,12 @@ class RelayStats(load: () -> String?, private val save: (String) -> Unit) {
     /** Reads saved figures back. */
     private fun parse(text: String) {
         val o = JSONObject(text)
+        o.optJSONObject(REST_KEY)?.let { r ->
+            r.keys().forEach { url -> r.optJSONArray(url)?.let { rests[url] = it.optLong(0) to it.optInt(1) } }
+        }
+        o.optJSONObject(NO_SYNC_KEY)?.let { n -> n.keys().forEach { url -> noSync[url] = n.optLong(url) } }
         o.keys().forEach { url ->
+            if (url == REST_KEY || url == NO_SYNC_KEY) return@forEach
             val list = o.optJSONArray(url) ?: return@forEach
             val days = java.util.TreeMap<Long, Day>()
             for (i in 0 until list.length()) {
@@ -105,6 +158,10 @@ class RelayStats(load: () -> String?, private val save: (String) -> Unit) {
     companion object {
         const val DAYS = 30
         private const val SAVE_EVERY_MS = 5 * 60_000L
+        private const val MAX_REST_MS = 24 * 3600_000L
+        private const val NO_SYNC_KEEP_MS = 7 * 24 * 3600_000L
+        private const val REST_KEY = "_rest"
+        private const val NO_SYNC_KEY = "_nosync"
     }
 }
 
