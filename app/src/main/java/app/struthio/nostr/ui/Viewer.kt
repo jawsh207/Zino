@@ -20,7 +20,6 @@ import android.net.Uri
 import android.view.Surface
 import android.view.TextureView
 import android.widget.FrameLayout
-import android.widget.MediaController
 import java.util.concurrent.Executors
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -30,6 +29,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,19 +44,27 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.FastForward
+import androidx.compose.material.icons.rounded.FastRewind
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -71,12 +79,18 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.delay
 import app.struthio.nostr.core.LinkInfo
 import app.struthio.nostr.core.formatDuration
 
@@ -150,7 +164,8 @@ fun ImageViewer(urls: List<String>, start: Int, onClose: () -> Unit) {
 
 /**
  * Tap to play with the platform's media player. Before that the card shows the note's thumbnail,
- * or, with link previews on, a still taken from the start of the video.
+ * or, with link previews on, a still taken from the start of the video. Playing stops when the
+ * card scrolls out of view, the screen changes or the app is left.
  */
 @Composable
 fun VideoCard(url: String, thumbnail: String? = null, aspect: Float = 16f / 9f, seconds: Double? = null) {
@@ -162,14 +177,28 @@ fun VideoCard(url: String, thumbnail: String? = null, aspect: Float = 16f / 9f, 
     var playing by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
+    var video by remember { mutableStateOf<NetVideoView?>(null) }
+    var controls by remember { mutableIntStateOf(0) }
     val active = LocalScreenActive.current
     LaunchedEffect(active) { if (!active) playing = false }
+    // Leaving the app stops the video; it doesn't carry on as sound in the background.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) playing = false }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     val openExternally = {
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(url), "video/*")) }
         Unit
     }
     Box(
         Modifier.padding(top = 10.dp).fillMaxWidth().aspectRatio(aspect).clip(RoundedCornerShape(20.dp)).background(Color.Black)
+            // A list keeps a card that has scrolled away for a while, so playing stops once less than
+            // a fifth of it is still on screen, rather than when the list lets it go.
+            .onGloballyPositioned { card ->
+                if (playing && card.boundsInWindow().height < card.size.height * MIN_SHOWN) playing = false
+            }
             // A tap anywhere on the video belongs to the video, never to the note it's in.
             .clickable(interactionSource = null, indication = null) { if (!playing && !failed) playing = true },
         contentAlignment = Alignment.Center,
@@ -180,15 +209,25 @@ fun VideoCard(url: String, thumbnail: String? = null, aspect: Float = 16f / 9f, 
                 AndroidView(
                     factory = {
                         NetVideoView(it, url).apply {
-                            onReady = { loading = false }
+                            onReady = {
+                                loading = false
+                                controls++
+                            }
                             onBuffering = { buffering -> loading = buffering }
                             onFailed = { failed = true }
+                            onTap = { controls++ }
+                            onFinished = { controls++ }
+                            video = this
                         }
                     },
-                    onRelease = { it.release() },
+                    onRelease = {
+                        video = null
+                        it.release()
+                    },
                     modifier = Modifier.fillMaxSize(),
                 )
                 if (loading) CircularProgressIndicator(color = Color.White)
+                video?.let { VideoControls(it, controls) }
             }
             else -> {
                 if (thumbnail != null) {
@@ -214,6 +253,97 @@ fun VideoCard(url: String, thumbnail: String? = null, aspect: Float = 16f / 9f, 
                             .padding(horizontal = 8.dp, vertical = 3.dp),
                     )
                 }
+            }
+        }
+    }
+}
+
+private const val MIN_SHOWN = 0.2f
+private const val SKIP_MS = 10_000
+private const val CONTROLS_SHOWN_MS = 3_000L
+
+/**
+ * Play, pause, skip and a position bar, drawn inside the video's card so they move with it when
+ * the list scrolls. Android's MediaController floats in a window of its own and stays put on
+ * screen instead. They show when [shown] changes (a tap, the start or the end) and fade after a
+ * few seconds while the video plays.
+ */
+@Composable
+private fun VideoControls(player: NetVideoView, shown: Int) {
+    var visible by remember { mutableStateOf(false) }
+    var touched by remember { mutableIntStateOf(0) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var position by remember { mutableIntStateOf(0) }
+    var duration by remember { mutableIntStateOf(0) }
+    var dragging by remember { mutableStateOf<Float?>(null) }
+    LaunchedEffect(shown) { if (shown > 0) visible = true }
+    // The player has no change callbacks for these, so they're read a few times a second.
+    LaunchedEffect(player) {
+        while (true) {
+            isPlaying = player.isPlaying()
+            position = player.position()
+            duration = player.duration()
+            delay(250)
+        }
+    }
+    LaunchedEffect(visible, isPlaying, touched, dragging) {
+        if (visible && isPlaying && dragging == null) {
+            delay(CONTROLS_SHOWN_MS)
+            visible = false
+        }
+    }
+    if (!visible) return
+    val touch = { touched++; Unit }
+    Box(
+        Modifier.fillMaxSize().background(Color(0x66000000))
+            // A tap on the dimmed video, away from the buttons, hides the controls again.
+            .clickable(interactionSource = null, indication = null) { visible = false },
+    ) {
+        Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
+            IconButton({
+                player.seekTo((player.position() - SKIP_MS).coerceAtLeast(0))
+                touch()
+            }) { Icon(Icons.Rounded.FastRewind, str(R.string.video_back), tint = Color.White, modifier = Modifier.size(36.dp)) }
+            IconButton(
+                {
+                    if (player.isPlaying()) player.pause() else player.start()
+                    isPlaying = player.isPlaying()
+                    touch()
+                },
+                Modifier.padding(horizontal = 16.dp).size(56.dp),
+            ) {
+                Icon(
+                    if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    str(if (isPlaying) R.string.pause_video else R.string.play_video),
+                    tint = Color.White,
+                    modifier = Modifier.size(44.dp),
+                )
+            }
+            IconButton({
+                val end = player.duration()
+                player.seekTo(if (end > 0) minOf(player.position() + SKIP_MS, end) else player.position() + SKIP_MS)
+                touch()
+            }) { Icon(Icons.Rounded.FastForward, str(R.string.video_forward), tint = Color.White, modifier = Modifier.size(36.dp)) }
+        }
+        if (duration > 0) {
+            Row(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val shownAt = dragging?.let { (it * duration).toInt() } ?: position
+                Text(formatDuration(shownAt / 1000.0), color = Color.White, style = MaterialTheme.typography.labelMedium)
+                Slider(
+                    value = dragging ?: (position.toFloat() / duration).coerceIn(0f, 1f),
+                    onValueChange = { dragging = it },
+                    onValueChangeFinished = {
+                        dragging?.let { player.seekTo((it * duration).toInt()) }
+                        dragging = null
+                        touch()
+                    },
+                    modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+                    colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color(0x66FFFFFF)),
+                )
+                Text(formatDuration(duration / 1000.0), color = Color.White, style = MaterialTheme.typography.labelMedium)
             }
         }
     }
@@ -277,14 +407,14 @@ fun LinkPreview(url: String) {
 }
 
 /**
- * A video from the network, drawn on a TextureView, with the platform's playback controls.
+ * A video from the network, drawn on a TextureView. Its controls are [VideoControls], drawn in
+ * Compose over it.
  * Everything that may wait on the network (opening the address, attaching the picture, and the
  * final release) runs on a thread of its own. MediaPlayer.reset and release on the main thread
  * wait for the media server to close its HTTP connection, which waits in turn for whatever read
  * is under way, including a name lookup that can hang for many seconds.
  */
-private class NetVideoView(context: Context, url: String) :
-    FrameLayout(context), TextureView.SurfaceTextureListener, MediaController.MediaPlayerControl {
+private class NetVideoView(context: Context, url: String) : FrameLayout(context), TextureView.SurfaceTextureListener {
     /** Called once the video can play. */
     var onReady: () -> Unit = {}
 
@@ -294,13 +424,18 @@ private class NetVideoView(context: Context, url: String) :
     /** Called when the video can't be played here. */
     var onFailed: () -> Unit = {}
 
+    /** Called when the video is tapped, to show the controls. */
+    var onTap: () -> Unit = {}
+
+    /** Called when the video reaches its end. */
+    var onFinished: () -> Unit = {}
+
     // One thread per video: a release stuck behind a hung lookup mustn't hold up the next video.
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "video") }
 
     // Made here, on the main thread, so its callbacks arrive on the main thread.
     private val player = MediaPlayer()
     private val texture = TextureView(context)
-    private val controller = MediaController(context)
     private val audio = context.getSystemService(AudioManager::class.java)
     private val attributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -321,16 +456,13 @@ private class NetVideoView(context: Context, url: String) :
         texture.surfaceTextureListener = this
         // Claims the tap that shows the controls, so the note doesn't open its comments too.
         isClickable = true
-        setOnClickListener { if (prepared && !released) controller.show() }
-        controller.setMediaPlayer(this)
-        controller.setAnchorView(this)
+        setOnClickListener { if (prepared && !released) onTap() }
         player.setAudioAttributes(attributes)
         player.setOnPreparedListener {
             if (released) return@setOnPreparedListener
             prepared = true
-            onReady()
             start()
-            controller.show()
+            onReady()
         }
         player.setOnInfoListener { _, what, _ ->
             when (what) {
@@ -349,7 +481,7 @@ private class NetVideoView(context: Context, url: String) :
             if (!released) onFailed()
             true
         }
-        player.setOnCompletionListener { controller.show(0) }
+        player.setOnCompletionListener { if (!released) onFinished() }
         texture.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fit() }
         worker.execute {
             try {
@@ -397,7 +529,6 @@ private class NetVideoView(context: Context, url: String) :
     fun release() {
         if (released) return
         released = true
-        controller.hide()
         audio?.abandonAudioFocusRequest(focus)
         val made = surface
         val drawnOn = texture.surfaceTexture
@@ -410,43 +541,28 @@ private class NetVideoView(context: Context, url: String) :
     }
 
     /** Plays, after asking for the sound, as any media app should. */
-    override fun start() {
+    fun start() {
         if (!prepared || released) return
         audio?.requestAudioFocus(focus)
         player.start()
     }
 
     /** Pauses. */
-    override fun pause() {
+    fun pause() {
         if (prepared && !released) player.pause()
     }
 
-    /** The video's length in ms, or -1 before it's known. */
-    override fun getDuration(): Int = if (prepared && !released) player.duration else -1
+    /** The video's length in ms, or 0 before it's known. */
+    fun duration(): Int = if (prepared && !released) player.duration.coerceAtLeast(0) else 0
 
     /** How far in the video is, in ms. */
-    override fun getCurrentPosition(): Int = if (prepared && !released) player.currentPosition else 0
+    fun position(): Int = if (prepared && !released) player.currentPosition else 0
 
-    /** Moves to [pos] ms. The player seeks on its own threads, so this doesn't wait. */
-    override fun seekTo(pos: Int) {
-        if (prepared && !released) player.seekTo(pos)
+    /** Moves to [ms]. The player seeks on its own threads, so this doesn't wait. */
+    fun seekTo(ms: Int) {
+        if (prepared && !released) player.seekTo(ms)
     }
 
     /** True if the video is playing now. */
-    override fun isPlaying(): Boolean = prepared && !released && player.isPlaying
-
-    /** How much of the video has downloaded, in percent. */
-    override fun getBufferPercentage(): Int = buffered
-
-    /** True: any network video can be paused. */
-    override fun canPause() = true
-
-    /** True: the controls may seek back. */
-    override fun canSeekBackward() = true
-
-    /** True: the controls may seek forward. */
-    override fun canSeekForward() = true
-
-    /** The player's audio session. */
-    override fun getAudioSessionId(): Int = if (released) 0 else player.audioSessionId
+    fun isPlaying(): Boolean = prepared && !released && player.isPlaying
 }

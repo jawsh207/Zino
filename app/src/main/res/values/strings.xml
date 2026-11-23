@@ -237,6 +237,9 @@
     <string name="picture_url">Picture URL</string>
     <string name="play_on_x">Play on %1$s</string>
     <string name="play_video">Play video</string>
+    <string name="pause_video">Pause video</string>
+    <string name="video_back">Back 10 seconds</string>
+    <string name="video_forward">Forward 10 seconds</string>
     <string name="plays_youtube_peertube_invidious_piped_and">Plays YouTube, PeerTube, Invidious, Piped and similar videos in notes. Nothing loads until you tap play, then that site can see your IP address and what you watch</string>
     <string name="point_at_a_qr_code">Point at a QR code</string>
     <string name="post">Post</string>

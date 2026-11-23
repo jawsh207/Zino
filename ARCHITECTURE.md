@@ -108,7 +108,7 @@ Pictures in a post show as a grid (`ImageGrid` in `ui/Note.kt`): one on its own,
 
 The screens that draw posts are `ui/Note.kt` (every post card), `ui/Thread.kt` (a post and its replies), `ui/Article.kt`, `ui/Poll.kt`, `ui/Invoice.kt`, `ui/Embed.kt` and `ui/Viewer.kt`.
 
-Videos play in `NetVideoView` (`ui/Viewer.kt`): Android's `MediaPlayer` drawn on a `TextureView`, with the platform's controls. It isn't `VideoView`, which resets its player on the main thread when a video scrolls away. That reset waits for the media server to drop its connection, and on a bad network that waits behind a stuck name lookup, long enough for Android to close the app as not responding. Opening the address, attaching the picture and the final release all run on a thread of each video's own.
+Videos play in `NetVideoView` (`ui/Viewer.kt`): Android's `MediaPlayer` drawn on a `TextureView`. Its controls (`VideoControls`) are drawn in Compose inside the card, so they scroll with it; Android's `MediaController` floats in a window of its own and stays put. A video stops once less than a fifth of its card is on screen, when the screen changes, or when the app is left. It isn't `VideoView`, which resets its player on the main thread when a video scrolls away. That reset waits for the media server to drop its connection, and on a bad network that waits behind a stuck name lookup, long enough for Android to close the app as not responding. Opening the address, attaching the picture and the final release all run on a thread of each video's own.
 
 ## Sending without a connection
 
