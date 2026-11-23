@@ -44,6 +44,7 @@ class ZinoApp : Application() {
     /** The app came to the front. */
     fun appStarted() {
         started++
+        core.checkNetwork()
         core.pool.activityStarted()
     }
 

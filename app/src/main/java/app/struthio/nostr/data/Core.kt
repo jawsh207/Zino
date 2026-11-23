@@ -223,6 +223,21 @@ class Core(
     private val followsLock = Mutex()
     private val nip05Checked = HashSet<String>()
 
+    /**
+     * Asks Android whether there's a network right now and tells the relays. Network news can go
+     * missing while the app sits in the background (Android holds back callbacks to apps it has
+     * frozen), which could leave the relays thinking they're offline, and feeds with nothing new,
+     * until the app was restarted. Called when the app comes to the front and on refresh.
+     */
+    fun checkNetwork() {
+        runCatching {
+            val manager = context.getSystemService(ConnectivityManager::class.java) ?: return
+            val network = manager.activeNetwork ?: return
+            val caps = manager.getNetworkCapabilities(network) ?: return
+            if (caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)) pool.networkAvailable(network)
+        }
+    }
+
     /** Hears about network changes from Android. */
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         /** A network came up: reconnect, then send anything that was waiting for it. */
@@ -1988,7 +2003,7 @@ class Core(
         }
         prefs.edit().putLong("checked_at", now).apply()
         val checker = RelayPool(scope, relayStats) { signer.value }
-        checker.activityStarted()
+        checker.activityStarted(log = false)
         try {
             val answered = checker.query(
                 readRelays().take(4).toSet(),

@@ -13,6 +13,9 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -222,6 +225,7 @@ private class Body(
     val emoji: Map<String, String>,
     val poll: Poll?,
     val invoices: List<Invoice>,
+    val unknownLinks: List<String>,
 )
 
 /** A post's content, hidden behind a button when it has a content warning (NIP-36). */
@@ -276,9 +280,19 @@ private fun NoteContent(event: Event, detail: Boolean, inQuote: Boolean) {
             emojiMap(event.tags),
             parsePoll(event),
             parts.filterIsInstance<Part.Lightning>().map { it.invoice },
+            // Links that may still be pictures: files named by their hash alone, as Blossom servers do.
+            parts.filterIsInstance<Part.Link>().map { it.url }.filter { it !in mediaUrls && mayBePicture(it) }.distinct().take(MAX_PROBED),
         )
     }
-    val text = linkedText(body.parts, body.emoji)
+    // Those links' type is asked once, with link previews on, and kept on disk.
+    val probed by produceState(emptyList<Media>(), event.id) {
+        if (!inQuote && body.unknownLinks.isNotEmpty() && core.linkPreviewsEnabled()) {
+            value = body.unknownLinks.filter { core.linkInfo(it)?.media == "image" }.map { Media(it, null) }
+        }
+    }
+    val images = remember(body, probed) { body.images + probed }
+    val probedUrls = remember(probed) { probed.map { it.url }.toSet() }
+    val text = linkedText(if (probedUrls.isEmpty()) body.parts else body.parts.filterNot { it is Part.Link && it.url in probedUrls }, body.emoji)
     val titled = event.kind == Kind.PICTURE || event.kind in Kind.VIDEOS
     // Some posts repeat their title as the start of their text; once is enough.
     if (titled) titleOf(event)?.takeUnless { event.content.trimStart().startsWith(it) }?.let {
@@ -310,23 +324,11 @@ private fun NoteContent(event: Event, detail: Boolean, inQuote: Boolean) {
     body.poll?.let { PollCard(event, it) }
     body.invoices.forEach { InvoiceCard(it) }
     var viewing by remember(event.id) { mutableStateOf<Int?>(null) }
-    body.images.take(if (detail) 12 else 4).forEachIndexed { index, media ->
-        NetImage(
-            media.url,
-            380.dp,
-            Modifier
-                .padding(top = 10.dp)
-                .fillMaxWidth()
-                .aspectRatio((media.aspect ?: 1.5f).coerceIn(0.7f, 2.4f))
-                .clip(RoundedCornerShape(20.dp))
-                .clickable { viewing = index },
-            blurhash = media.blurhash,
-        )
-    }
-    viewing?.let { start -> ImageViewer(body.images.map { it.url }, start) { viewing = null } }
+    if (images.isNotEmpty()) ImageGrid(images, detail) { viewing = it }
+    viewing?.let { start -> ImageViewer(images.map { it.url }, start) { viewing = null } }
     if (!inQuote) {
         body.videos.take(2).forEach { VideoCard(it, body.thumbnails[it]) }
-        if (body.images.isEmpty() && body.videos.isEmpty()) body.preview?.let { link ->
+        if (images.isEmpty() && body.videos.isEmpty()) body.preview?.let { link ->
             val embed = if (core.videoEmbedsEnabled()) videoEmbed(link) else null
             when {
                 embed != null -> EmbedCard(link, embed)
@@ -336,6 +338,70 @@ private fun NoteContent(event: Event, detail: Boolean, inQuote: Boolean) {
         body.quotes.take(2).forEach { QuoteCard(it) }
     }
 }
+
+/**
+ * A post's pictures as a grid: one on its own in its own shape, two side by side, three as one
+ * large and two small, four or more two by two. In a feed four tiles show, the last saying how many
+ * more there are; a post opened on its own shows them all. Tapping one opens them all, from there.
+ */
+@Composable
+private fun ImageGrid(images: List<Media>, detail: Boolean, open: (Int) -> Unit) {
+    val gap = 4.dp
+    val shape = RoundedCornerShape(20.dp)
+
+    /** One picture filling its cell; [more] covers it with a count of the pictures not shown. */
+    @Composable
+    fun Tile(index: Int, modifier: Modifier, more: Int = 0) {
+        Box(modifier.clickable { open(index) }) {
+            NetImage(images[index].url, 200.dp, Modifier.matchParentSize(), blurhash = images[index].blurhash)
+            if (more > 0) {
+                Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
+                    Text("+$more", color = Color.White, style = MaterialTheme.typography.headlineMedium)
+                }
+            }
+        }
+    }
+
+    val frame = Modifier.padding(top = 10.dp).fillMaxWidth().clip(shape)
+    when {
+        images.size == 1 -> Tile(0, frame.aspectRatio((images[0].aspect ?: 1.5f).coerceIn(0.7f, 2.4f)))
+        images.size == 2 -> Row(frame.aspectRatio(2f), horizontalArrangement = Arrangement.spacedBy(gap)) {
+            Tile(0, Modifier.weight(1f).fillMaxHeight())
+            Tile(1, Modifier.weight(1f).fillMaxHeight())
+        }
+        images.size == 3 -> Row(frame.aspectRatio(1.5f), horizontalArrangement = Arrangement.spacedBy(gap)) {
+            Tile(0, Modifier.weight(1f).fillMaxHeight())
+            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(gap)) {
+                Tile(1, Modifier.weight(1f).fillMaxWidth())
+                Tile(2, Modifier.weight(1f).fillMaxWidth())
+            }
+        }
+        !detail -> Column(frame.aspectRatio(1f), verticalArrangement = Arrangement.spacedBy(gap)) {
+            for (row in 0..1) {
+                Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    Tile(row * 2, Modifier.weight(1f).fillMaxHeight())
+                    Tile(row * 2 + 1, Modifier.weight(1f).fillMaxHeight(), more = if (row == 1) images.size - 4 else 0)
+                }
+            }
+        }
+        else -> Column(frame, verticalArrangement = Arrangement.spacedBy(gap)) {
+            images.indices.chunked(2).forEach { pair ->
+                Row(Modifier.fillMaxWidth().aspectRatio(if (pair.size == 2) 2f else 1.5f), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    pair.forEach { Tile(it, Modifier.weight(1f).fillMaxHeight()) }
+                }
+            }
+        }
+    }
+}
+
+/** True if a link could be a picture without saying so: no file ending, as files named by their hash have. */
+private fun mayBePicture(url: String): Boolean {
+    val path = url.substringAfter("://").substringAfter('/', "").substringBefore('?').substringBefore('#')
+    val last = path.substringAfterLast('/')
+    return '.' !in last && last.length >= 32
+}
+
+private const val MAX_PROBED = 6
 
 /** A post or article quoted inside another, as a small card. */
 @Composable

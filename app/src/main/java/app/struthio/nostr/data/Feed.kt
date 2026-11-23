@@ -106,6 +106,7 @@ class Feed(private val core: Core, private val source: FeedSource) {
 
     /** Starts the feed afresh, as pull to refresh does. */
     fun refresh() {
+        core.checkNetwork()
         stop()
         start()
     }

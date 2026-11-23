@@ -46,6 +46,8 @@ Each account on the phone has its own database, settings and secrets files (`dat
 - **Sign-in (NIP-42).** Only when a relay demands it. Requests waiting on sign-in are sent again once it succeeds.
 - **Failing relays rest.** A relay that keeps failing, refuses us or rate-limits us is left alone for a while, so a dead relay doesn't slow everything down. A failure while the phone has no network doesn't count against any relay.
 - **Reconnects** ask only for what's newer than what the relay already sent.
+- **Checking the network on return.** Android can hold back network news while the app sits frozen in the background, so on coming to the front (and on pull to refresh) `Core.checkNetwork` asks Android directly and tells the relays, rather than trusting what they last heard.
+- **Relays that can't do something** aren't asked again that session: one that answers COUNT with a notice about an unknown command, or that says it accepts no requests at all (a write-only relay).
 - **Data use and uptime** per relay are counted in `net/RelayStats.kt` and shown on the relay screens.
 - **Not now or no?** When a post fails, `PublishResult.retryable` says whether trying later could help: no relay answered, the connection dropped, or the answers were "rate-limited:" or "error:" (NIP-01). An outright refusal like "blocked:" is shown as an error instead.
 
@@ -100,6 +102,8 @@ The rules for reading a post are in `core/`:
 - `Protocols.kt` finds links, hashtags, mentions, pictures, videos, invoices, polls and threads in a post.
 - `Posts.kt` reads picture posts, video posts and articles.
 - `Markdown.kt` reads article text.
+
+Pictures in a post show as a grid (`ImageGrid` in `ui/Note.kt`): one on its own, two side by side, three as one large and two small, four or more two by two, with a "+N" tile in feeds. Links with no file ending and a long hash-like name, as Blossom servers give, are checked once for their type when link previews are on, and shown as pictures if they are.
 
 The screens that draw posts are `ui/Note.kt` (every post card), `ui/Thread.kt` (a post and its replies), `ui/Article.kt`, `ui/Poll.kt`, `ui/Invoice.kt`, `ui/Embed.kt` and `ui/Viewer.kt`.
 

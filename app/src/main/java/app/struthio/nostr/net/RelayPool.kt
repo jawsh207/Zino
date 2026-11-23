@@ -326,9 +326,12 @@ class RelayPool(
         }
     }
 
-    /** Counted, because an old activity's stop can arrive after the next one has started. */
-    fun activityStarted() {
-        if (visible.incrementAndGet() == 1) AppLog.add("app opened")
+    /**
+     * Counted, because an old activity's stop can arrive after the next one has started. A pool
+     * used for background checks passes [log] false, so the log doesn't say the app was opened.
+     */
+    fun activityStarted(log: Boolean = true) {
+        if (visible.incrementAndGet() == 1 && log) AppLog.add("app opened")
         leaving = false
         pauseJob?.cancel()
         foreground = true
@@ -463,6 +466,12 @@ class RelayPool(
         var signInRefused = false
         private val waitingForAuth = LinkedHashSet<String>()
         private var idleJob: Job? = null
+
+        // Set when this relay said it doesn't support COUNT (NIP-45).
+        @Volatile private var noCount = false
+
+        // Set when this relay said it takes no requests at all, as write-only relays do.
+        @Volatile private var readsRefused = false
         private var retryJob: Job? = null
 
         /**
@@ -471,7 +480,7 @@ class RelayPool(
          */
         fun add(sub: Subscription) {
             val cooling = synchronized(lock) {
-                if (cooling()) return@synchronized true
+                if (cooling() || readsRefused) return@synchronized true
                 subs[sub.id] = sub
                 idleJob?.cancel()
                 ensureConnected()
@@ -532,6 +541,11 @@ class RelayPool(
 
         /** Asks this relay how many events match (NIP-45). */
         fun count(id: String, request: String, onResult: (Long?) -> Unit) {
+            // A relay that said it doesn't know COUNT isn't asked again this session.
+            if (noCount) {
+                onResult(null)
+                return
+            }
             val send = synchronized(lock) {
                 counts[id] = request to onResult
                 idleJob?.cancel()
@@ -836,6 +850,12 @@ class RelayPool(
                         val failed = synchronized(lock) { negs.values.map { it.second }.also { negs.clear() } }
                         failed.forEach { it(null) }
                     }
+                    // The same for counts (NIP-45): "Unknown message type: COUNT" and the like.
+                    if (text.contains("COUNT")) {
+                        noCount = true
+                        val failed = synchronized(lock) { counts.values.map { it.second }.also { counts.clear() } }
+                        failed.forEach { it(null) }
+                    }
                 }
                 "NEG-ERR" -> {
                     note(url, "negentropy: ${msg.optString(2)}")
@@ -875,6 +895,8 @@ class RelayPool(
                             subs.remove(id)
                             sent.remove(id)
                             if (reason.startsWith("rate-limited")) limitedUntil = System.currentTimeMillis() + RATE_LIMIT_PAUSE_MS
+                            // "this relay does not accept REQs": asking again this session is pointless.
+                            if (reason.contains("not accept REQ", ignoreCase = true)) readsRefused = true
                             pump()
                         }
                         sub.onDone(url, false)

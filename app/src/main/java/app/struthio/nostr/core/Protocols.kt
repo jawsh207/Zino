@@ -159,7 +159,8 @@ fun prepareContent(text: String): Pair<String, Tags> {
     return content to tags.distinct()
 }
 
-private val IMAGE_EXT = Regex(""".*\.(jpe?g|png|webp|gif|avif)(\?.*)?$""", RegexOption.IGNORE_CASE)
+// Endings Android can show, before any query or fragment (some apps add "#m=image/jpeg&dim=...").
+private val IMAGE_EXT = Regex(""".*\.(jpe?g|png|webp|gif|avif|heic|heif|bmp)([?#].*)?$""", RegexOption.IGNORE_CASE)
 
 /** An image or video address, with its shape and blurred preview (blurhash) if the post gives them. */
 data class Media(val url: String, val aspect: Float?, val blurhash: String? = null)

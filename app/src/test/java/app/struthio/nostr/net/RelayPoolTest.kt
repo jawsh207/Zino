@@ -165,6 +165,32 @@ class RelayPoolTest {
     }
 }
 
+/** Relays that say they can't do something aren't kept waiting on, or asked again. */
+class RelayRefusalTest {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val pool = RelayPool(scope) { null }.apply { activityStarted() }
+
+    @After
+    fun tearDown() = scope.cancel()
+
+    @Test
+    fun aRelayWithoutCountAnswersAtOnceAndIsNotAskedAgain() = runBlocking {
+        val asked = java.util.concurrent.atomic.AtomicInteger()
+        val relay = FakeRelay(onOther = { m, send ->
+            if (m.getString(0) == "COUNT") {
+                asked.incrementAndGet()
+                send("""["NOTICE","Unknown message type: COUNT"]""")
+            }
+        })
+        val started = System.currentTimeMillis()
+        assertEquals(null, pool.count(setOf(relay.url), Filter(kinds = listOf(Kind.NOTE)), timeoutMs = 5000))
+        assertTrue(System.currentTimeMillis() - started < 3000)
+        assertEquals(null, pool.count(setOf(relay.url), Filter(kinds = listOf(Kind.NOTE)), timeoutMs = 5000))
+        assertEquals(1, asked.get())
+        relay.close()
+    }
+}
+
 /** What a failed post tells Core: whether keeping it and trying later can help. */
 class PublishRetryTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
