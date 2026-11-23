@@ -23,6 +23,7 @@ import android.util.Log
 import app.struthio.nostr.MainActivity
 import app.struthio.nostr.R
 import app.struthio.nostr.ZinoApp
+import app.struthio.nostr.core.cut
 import app.struthio.nostr.core.Nip19
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -132,7 +133,7 @@ object Notifier {
                 id,
                 styled(ACTIVITY)
                     .setContentTitle(alert.headline(name(alert.actor)))
-                    .setContentText(alert.detail.take(200))
+                    .setContentText(alert.detail.cut(200))
                     .setContentIntent(open(context, id, alert.target, account))
                     .build(),
             )

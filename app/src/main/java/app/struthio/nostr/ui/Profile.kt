@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import app.struthio.nostr.core.cut
 import app.struthio.nostr.core.Event
 import app.struthio.nostr.core.GalleryItem
 import app.struthio.nostr.core.ProfileTab
@@ -663,7 +664,7 @@ private fun StatusDialog(current: String, onDismiss: () -> Unit, onSave: (text: 
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     text,
-                    { text = it.take(140) },
+                    { text = it.cut(140) },
                     placeholder = { Text(str(R.string.what_are_you_up_to)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),

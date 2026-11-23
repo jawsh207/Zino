@@ -95,6 +95,16 @@ private val TOKEN = Regex(
         """|(?<![\p{L}\p{N}_/&#])#[\p{L}\p{N}_]+""",
 )
 
+/**
+ * The first [n] characters at most, without cutting an emoji or other character made of two
+ * UTF-16 halves in two: half of one shows as a broken glyph, and some tools refuse the text.
+ */
+fun String.cut(n: Int): String {
+    if (length <= n) return this
+    val end = if (n > 0 && this[n - 1].isHighSurrogate()) n - 1 else n
+    return substring(0, end)
+}
+
 /** Splits note text into its parts, in order: text, links, hashtags, mentions and invoices. */
 fun parseContent(content: String): List<Part> {
     val parts = ArrayList<Part>()
@@ -738,7 +748,7 @@ fun parseLinkInfo(url: String, html: String): LinkInfo? {
     if (title.isEmpty()) return null
     val description = meta["og:description"] ?: meta["twitter:description"] ?: meta["description"] ?: ""
     val image = (meta["og:image"] ?: meta["twitter:image"])?.takeIf { it.startsWith("https://") }
-    return LinkInfo(url, title.take(160), description.take(240), image)
+    return LinkInfo(url, title.cut(160), description.cut(240), image)
 }
 
 /** Only ordinary public names: a note must not make the phone probe its own network. */

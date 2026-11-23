@@ -76,6 +76,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.struthio.nostr.core.cut
 import app.struthio.nostr.core.Entity
 import app.struthio.nostr.core.Event
 import app.struthio.nostr.core.Kind
@@ -643,7 +644,7 @@ fun linkedText(parts: List<Part>, emoji: Map<String, String>): AnnotatedString {
                     LinkAnnotation.Clickable("url", linkStyle) {
                         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(part.url))) }
                     },
-                ) { append(part.url.removePrefix("https://").removePrefix("http://").let { if (it.length > 40) it.take(38) + "…" else it }) }
+                ) { append(part.url.removePrefix("https://").removePrefix("http://").let { if (it.length > 40) it.cut(38) + "…" else it }) }
                 is Part.Mention -> when (val entity = part.entity) {
                     is Entity.Profile -> withLink(LinkAnnotation.Clickable("user", linkStyle) { nav.push(Screen.Profile(entity.pubkey)) }) {
                         append("@" + core.displayName(entity.pubkey))

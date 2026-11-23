@@ -55,3 +55,14 @@ class BlurhashTest {
         assertEquals("LEHV6nWB2yk8pyo0adR*.7kCMdnj", pictures(picture).single().blurhash)
     }
 }
+
+/** Cutting text never leaves half an emoji behind. */
+class CutTest {
+    @Test
+    fun anEmojiIsNeverCutInHalf() {
+        val robot = "🤖"
+        assertEquals("ab", "ab${robot}c".cut(3))
+        assertEquals("ab$robot", "ab${robot}c".cut(4))
+        assertEquals("short", "short".cut(10))
+    }
+}

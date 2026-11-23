@@ -45,7 +45,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.struthio.nostr.core.DEFAULT_REACTION
 import app.struthio.nostr.data.Upload
-import java.text.BreakIterator
 
 /** Picks one image through the system photo picker and uploads it. */
 @Composable
@@ -100,13 +99,6 @@ private val EMOJI = listOf(
     "🔥", "⚡", "✨", "💯", "🎉", "🚀", "👀", "💎", "🌱", "☕", "🍻", "🍕", "🐸", "🦤", "🌽", "₿",
 )
 
-/** The first character as people see it, so emoji made of several code points stay whole. */
-private fun firstGrapheme(text: String): String {
-    val breaks = BreakIterator.getCharacterInstance()
-    breaks.setText(text)
-    val end = breaks.next()
-    return if (end == BreakIterator.DONE) text else text.substring(0, end)
-}
 
 /** Long press on the reaction button: any emoji, with the purple heart first. */
 @Composable
@@ -125,7 +117,7 @@ fun EmojiSheet(onPick: (String) -> Unit, onDismiss: () -> Unit) {
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(other, { other = it }, label = { Text(str(R.string.any_emoji)) }, singleLine = true, modifier = Modifier.weight(1f))
-                TextButton({ onPick(firstGrapheme(other.trim()).ifEmpty { DEFAULT_REACTION }) }, enabled = other.isNotBlank()) { Text(str(R.string.react)) }
+                TextButton({ onPick(graphemes(other.trim(), 1).ifEmpty { DEFAULT_REACTION }) }, enabled = other.isNotBlank()) { Text(str(R.string.react)) }
             }
         }
     }

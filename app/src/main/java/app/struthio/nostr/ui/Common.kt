@@ -265,10 +265,24 @@ fun Modifier.fullBleed(gutter: Dp) = layout { measurable, constraints ->
 /** Up to two initials for a name. */
 private fun initials(name: String): String {
     val words = name.split(' ').filter { it.isNotEmpty() }
+    // Whole characters as people see them, so a name starting with an emoji keeps its emoji whole.
     return when {
-        words.size >= 2 -> "${words[0].first()}${words[1].first()}"
-        else -> name.take(2)
+        words.size >= 2 -> graphemes(words[0], 1) + graphemes(words[1], 1)
+        else -> graphemes(name, 2)
     }.uppercase()
+}
+
+/** The first [count] characters as people see them, so emoji made of several code points stay whole. */
+internal fun graphemes(text: String, count: Int): String {
+    val breaks = java.text.BreakIterator.getCharacterInstance()
+    breaks.setText(text)
+    var end = 0
+    repeat(count) {
+        val next = breaks.next()
+        if (next == java.text.BreakIterator.DONE) return text
+        end = next
+    }
+    return text.substring(0, end)
 }
 
 /** A loading indicator, centred. */

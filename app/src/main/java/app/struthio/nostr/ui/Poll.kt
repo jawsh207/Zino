@@ -43,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.struthio.nostr.core.cut
 import app.struthio.nostr.core.Event
 import app.struthio.nostr.core.Poll
 import app.struthio.nostr.core.countVotes
@@ -157,7 +158,7 @@ fun PollEditor(draft: PollDraft) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     text,
-                    { draft.options[index] = it.take(100) },
+                    { draft.options[index] = it.cut(100) },
                     placeholder = { Text(str(R.string.option_x, index + 1)) },
                     singleLine = true,
                     modifier = Modifier.weight(1f),

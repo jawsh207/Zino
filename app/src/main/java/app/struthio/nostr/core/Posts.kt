@@ -92,7 +92,7 @@ data class Article(val title: String, val summary: String?, val image: String?, 
 /** An article's title, summary, picture and publish date, or null if [event] isn't an article. */
 fun article(event: Event): Article? {
     if (event.kind != Kind.ARTICLE) return null
-    val title = titleOf(event) ?: event.content.lineSequence().firstOrNull { it.isNotBlank() }?.trimStart('#', ' ')?.take(120)
+    val title = titleOf(event) ?: event.content.lineSequence().firstOrNull { it.isNotBlank() }?.trimStart('#', ' ')?.cut(120)
         ?: return null
     return Article(
         title,

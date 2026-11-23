@@ -44,6 +44,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.struthio.nostr.core.cut
 import app.struthio.nostr.core.Entity
 import app.struthio.nostr.core.Event
 import app.struthio.nostr.core.Markdown
@@ -201,7 +202,7 @@ private fun spans(list: List<Markdown.Span>): AnnotatedString {
                 span.text != link -> span.text
                 entity is Entity.Profile -> "@" + core.displayName(entity.pubkey)
                 entity != null -> "note"
-                else -> link.removePrefix("https://").removePrefix("http://").let { if (it.length > 48) it.take(46) + "…" else it }
+                else -> link.removePrefix("https://").removePrefix("http://").let { if (it.length > 48) it.cut(46) + "…" else it }
             }
             withLink(
                 LinkAnnotation.Clickable("link", linkStyle) {
