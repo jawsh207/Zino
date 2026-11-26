@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The rounded card every Zino widget sits on; Android 12 and later use the launcher's own corner size. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <corners android:radius="@android:dimen/system_app_widget_background_radius" />
+    <solid android:color="@color/widget_background" />
+</shape>

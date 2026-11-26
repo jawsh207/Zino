@@ -1,7 +1,7 @@
 /*
  * The wallet, through Nostr Wallet Connect (NIP-47). Zino holds no money: it sends encrypted
  * requests to the user's own wallet over relays, to check the balance, list payments, pay invoices
- * and make new ones.
+ * and make new ones. The last balance is also kept in the account's settings, for the wallet widget.
  */
 package app.struthio.nostr.data
 
@@ -43,16 +43,21 @@ data class Transaction(
 
 /** NIP-47 with NIP-44 encryption only. Keys and funds stay with the user's wallet service. */
 class Wallet(private val core: Core) {
-    private companion object {
+    companion object {
+        /** What the connected wallet can do, saved alongside the connection. */
         const val METHODS = "nwc_methods"
-        const val LISTEN_MS = 3_000L
-        const val RESEND_MS = 10_000L
+
+        /** The last balance the wallet gave, in millisats, and when (seconds), in the account's settings. */
+        const val BALANCE_KEY = "wallet_balance_msats"
+        const val BALANCE_AT_KEY = "wallet_balance_at"
+        private const val LISTEN_MS = 3_000L
+        private const val RESEND_MS = 10_000L
 
         /** Asking these twice does no harm, so an unanswered request is sent again. */
-        val REPEATABLE = setOf("get_balance", "list_transactions", "get_info", "get_budget", "lookup_invoice")
+        private val REPEATABLE = setOf("get_balance", "list_transactions", "get_info", "get_budget", "lookup_invoice")
 
         /** For connections saved before methods were kept; the next answer from the wallet corrects it. */
-        val ASSUMED_METHODS = setOf("pay_invoice", "get_balance", "make_invoice", "list_transactions")
+        private val ASSUMED_METHODS = setOf("pay_invoice", "get_balance", "make_invoice", "list_transactions")
     }
 
     /**
@@ -120,7 +125,8 @@ class Wallet(private val core: Core) {
         stopListening()
         connection = null
         core.secure.remove(Core.KEY_NWC)
-        core.prefs.edit().remove(METHODS).apply()
+        core.prefs.edit().remove(METHODS).remove(BALANCE_KEY).remove(BALANCE_AT_KEY).apply()
+        core.widgetsChanged()
         problem.value = null
         connected.value = false
         balance.value = null
@@ -244,7 +250,13 @@ class Wallet(private val core: Core) {
 
     /** Fetches the balance and recent payments, if the wallet supports them. */
     private suspend fun fetch() {
-        if (supports("get_balance")) balance.value = call("get_balance").optLong("balance")
+        if (supports("get_balance")) {
+            val msats = call("get_balance").optLong("balance")
+            balance.value = msats
+            // Kept for the home screen widget, which can't reach the wallet itself.
+            core.prefs.edit().putLong(BALANCE_KEY, msats).putLong(BALANCE_AT_KEY, nowSeconds()).apply()
+            core.widgetsChanged()
+        }
         if (supports("list_transactions")) {
             val list = call("list_transactions", JSONObject().put("limit", 30)).optJSONArray("transactions")
             if (list != null) {

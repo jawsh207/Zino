@@ -18,6 +18,8 @@ The name comes from *struzzino*, Italian for a baby ostrich, cut down to its las
 - Several accounts on one phone, each kept separate, switched from Settings, with notifications for all of them
 - Muted words and hashtags
 - Posts, reactions and messages made without a connection are kept and sent once it's back
+- Long-press shortcuts on the app icon: New post, Messages and Scan QR code
+- Home screen widgets: Write a post, Wallet balance, and the newest posts from people you follow
 - Ready for translation: all text is in `strings.xml`, and Android's per-app language setting works
 
 ## Protocol

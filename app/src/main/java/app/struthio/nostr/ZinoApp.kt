@@ -1,7 +1,8 @@
 /*
  * The application object. It keeps the list of accounts and the Core of the one in use, starts the
  * log, and switches accounts: the old Core is closed and a new one opens on the other account's
- * own files. Screens watch [ZinoApp.current], so they redraw for the new account.
+ * own files. Screens watch [ZinoApp.current], so they redraw for the new account. Home screen
+ * widgets always show the account in use, so they're redrawn on every switch.
  */
 package app.struthio.nostr
 
@@ -12,6 +13,7 @@ import app.struthio.nostr.data.Accounts
 import app.struthio.nostr.data.Core
 import app.struthio.nostr.data.Notifier
 import app.struthio.nostr.net.AppLog
+import app.struthio.nostr.widget.Widgets
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -31,11 +33,12 @@ class ZinoApp : Application() {
     val core: Core
         get() = state.value ?: synchronized(this) { state.value ?: open(accounts.activeId).also { state.value = it } }
 
-    /** Starts the log as the app starts. */
+    /** Starts the log and puts the shortcuts on the launcher icon as the app starts. */
     override fun onCreate() {
         super.onCreate()
         Texts.use(this)
         AppLog.start(File(filesDir, "log.txt"))
+        Shortcuts.install(this)
     }
 
     /** A Core for one account, which tells us when that account signs out. */
@@ -64,13 +67,22 @@ class ZinoApp : Application() {
         state.value = new
         old.close()
         AppLog.add("switched account")
+        // Widgets show the account in use.
+        Widgets.update(this)
     }
 
     /**
      * One background check for every signed-in account, side by side. The account in use checks
      * through its own Core; the others each get a Core of their own for the check, closed after.
+     * The widgets are redrawn afterwards with whatever the check brought in.
      */
-    suspend fun checkAllAccounts() = coroutineScope {
+    suspend fun checkAllAccounts() {
+        checkEach()
+        Widgets.update(this)
+    }
+
+    /** Runs the check for each signed-in account side by side, returning once all are done. */
+    private suspend fun checkEach() = coroutineScope {
         val active = core
         launch { runCatching { active.backgroundCheck() } }
         for (account in accounts.list.value) {

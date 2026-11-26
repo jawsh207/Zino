@@ -1,6 +1,6 @@
 /*
- * The one Android screen Zino runs in. It shows the app, passes nostr: and other links to it,
- * carries requests to and from a signer app, and tells the relays when the app comes to the front
+ * The one Android screen Zino runs in. It shows the app, passes nostr: and other links to it (and
+ * what a launcher shortcut or home screen widget asked to open), carries requests to and from a signer app, and tells the relays when the app comes to the front
  * or goes away.
  */
 package app.struthio.nostr
@@ -19,6 +19,7 @@ import app.struthio.nostr.data.SignerBridge
 import app.struthio.nostr.data.SignerResult
 import app.struthio.nostr.ui.App
 import app.struthio.nostr.ui.ZinoTheme
+import app.struthio.nostr.widget.Widgets
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -56,7 +57,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         app.openAccountOf(intent)
-        deepLink.value = intent?.dataString
+        deepLink.value = Shortcuts.linkOf(intent)
         setContent {
             ZinoTheme {
                 val core by app.current.collectAsState()
@@ -76,11 +77,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
     }
 
-    /** A link opened while Zino was already running. */
+    /** A link, shortcut or widget opened while Zino was already running. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         app.openAccountOf(intent)
-        deepLink.value = intent.dataString
+        deepLink.value = Shortcuts.linkOf(intent)
     }
 
     /** The app came to the front: relays may connect. */
@@ -89,9 +90,10 @@ class MainActivity : ComponentActivity() {
         app.appStarted()
     }
 
-    /** The app went away: relays disconnect once idle. */
+    /** The app went away: relays disconnect once idle, and widgets show what was just loaded. */
     override fun onStop() {
         super.onStop()
         app.appStopped()
+        Widgets.update(this)
     }
 }

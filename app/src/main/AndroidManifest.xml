@@ -48,6 +48,44 @@
                 <data android:scheme="nostr+walletconnect" />
             </intent-filter>
         </activity>
+        <!-- Home screen widgets (widget/). Android itself sends their updates, so none is exported. -->
+        <receiver
+            android:name=".widget.ComposeWidget"
+            android:exported="false"
+            android:label="@string/widget_compose">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_compose_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.WalletWidget"
+            android:exported="false"
+            android:label="@string/wallet">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_wallet_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.FeedWidget"
+            android:exported="false"
+            android:label="@string/following">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_feed_info" />
+        </receiver>
+        <service
+            android:name=".widget.FeedService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
         <service
             android:name=".data.CheckService"
             android:exported="false"

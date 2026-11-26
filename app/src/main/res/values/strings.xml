@@ -467,4 +467,19 @@
     <string name="muted_words_explained">Posts, replies and notifications with these words or hashtags are hidden. Start with # to mute a hashtag.</string>
     <string name="add_a_word_or_hashtag">A word or #hashtag</string>
     <string name="nothing_muted_yet">No muted words or hashtags yet.</string>
+    <!-- Home screen shortcuts and widgets -->
+    <string name="new_post">New post</string>
+    <string name="widget_compose">Write a post</string>
+    <string name="widget_compose_about">Opens a new post in one tap</string>
+    <string name="widget_wallet_about">Your wallet balance, as last seen in Zino</string>
+    <string name="widget_feed_about">Newest posts from the people you follow</string>
+    <string name="widget_no_wallet">No wallet connected</string>
+    <string name="widget_balance_as_of">As of %1$s</string>
+    <string name="widget_show_balance">Show balance</string>
+    <string name="widget_hide_balance">Hide balance</string>
+    <string name="widget_open_to_load">Open Zino to load posts</string>
+    <string name="widget_boosted">%1$s boosted</string>
+    <string name="not_a_nostr_code">That QR code isn\'t a Nostr or wallet link</string>
+    <string name="widget_picture">Picture</string>
+    <string name="widget_video">Video</string>
 </resources>
