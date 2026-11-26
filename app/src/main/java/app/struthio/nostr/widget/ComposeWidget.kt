@@ -1,6 +1,8 @@
 /*
- * The Write a post widget: one pill on the home screen that opens a new post in the account in
- * use. It shows nothing that changes, so drawing it only sets where the tap goes.
+ * The Write a post widget: one pill on the home screen, with Zino's logo on the left and a pencil
+ * on the right, that opens a new post in the account in use. Unlike the other widgets it has no
+ * card behind it, so only the pill shows over the wallpaper. It shows nothing that changes, so
+ * drawing it only sets where the tap goes.
  */
 package app.struthio.nostr.widget
 

@@ -179,7 +179,7 @@ Message notifications never say who sent the message or what it says.
 
 | Widget | File | Shows |
 |---|---|---|
-| Write a post | `widget/ComposeWidget.kt` | A pill that opens a new post |
+| Write a post | `widget/ComposeWidget.kt` | A pill with Zino's logo and a pencil, on a see-through background, that opens a new post |
 | Wallet | `widget/WalletWidget.kt` | The last balance the wallet gave, when, and an eye button that hides it. Tapping opens the Wallet tab. |
 | Following | `widget/FeedWidget.kt` | The newest 20 stored posts from people you follow, without muted ones. Tapping a post opens it; the pencil writes a post. |
 
