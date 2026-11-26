@@ -1,11 +1,13 @@
 /*
  * The app's frame and navigation: the four tabs (Home, Messages, Wallet, Notifications), a stack
- * of screens on top of them, the back gesture, snackbar messages, and opening nostr: links.
+ * of screens on top of them, the back gesture, snackbar messages, and opening nostr: links and
+ * the "zino:" links that launcher shortcuts and widgets send (see Shortcuts.kt).
  */
 package app.struthio.nostr.ui
 
 import app.struthio.nostr.str
 import app.struthio.nostr.R
+import app.struthio.nostr.Shortcuts
 import android.Manifest
 import android.os.Build
 import androidx.activity.compose.BackHandler
@@ -162,11 +164,25 @@ fun App(core: Core, deepLink: MutableStateFlow<String?>) {
     val pager = rememberPagerState { TABS.size }
     var pendingWallet by remember { mutableStateOf<String?>(null) }
     val link by deepLink.collectAsState()
+    var scanning by remember { mutableStateOf(false) }
 
     LaunchedEffect(link, signer) {
         val target = link ?: return@LaunchedEffect
         if (signer == null) return@LaunchedEffect
         deepLink.value = null
+        when (target) {
+            Shortcuts.LINK_COMPOSE -> nav.push(Screen.Compose())
+            Shortcuts.LINK_MESSAGES -> {
+                nav.stack.clear()
+                pager.requestScrollToPage(1)
+            }
+            Shortcuts.LINK_WALLET -> {
+                nav.stack.clear()
+                pager.requestScrollToPage(2)
+            }
+            Shortcuts.LINK_SCAN -> scanning = true
+        }
+        if (target.startsWith("zino:")) return@LaunchedEffect
         if (target.startsWith("nostr+walletconnect:")) {
             pendingWallet = target
             nav.stack.clear()
@@ -281,6 +297,16 @@ fun App(core: Core, deepLink: MutableStateFlow<String?>) {
                     }
                 }
             }
+        }
+        // Opened by the launcher shortcut. What it reads is opened like any other link.
+        if (scanning) {
+            QrScanner({ scanned ->
+                scanning = false
+                val text = scanned.trim()
+                val opens = text.startsWith("nostr+walletconnect:") ||
+                    Nip19.decode(text).let { it is Entity.Profile || it is Entity.Note || it is Entity.Address }
+                if (opens) deepLink.value = text else nav.say(str(R.string.not_a_nostr_code))
+            }) { scanning = false }
         }
     }
 }

@@ -2,7 +2,7 @@
 
 This is a map of the code: what each part does, how the parts talk to each other, and where to look. Every source file also starts with a short description of its own.
 
-All code lives in `app/src/main/java/app/struthio/nostr/`, in four folders:
+All code lives in `app/src/main/java/app/struthio/nostr/`, in five folders:
 
 | Folder | What's in it |
 |---|---|
@@ -10,6 +10,7 @@ All code lives in `app/src/main/java/app/struthio/nostr/`, in four folders:
 | `net/` | Talking to the outside world: relays, WebSockets, HTTPS, and the app log. |
 | `data/` | The app's state and actions: the account, the database, feeds, messages, the wallet, uploads and notifications. |
 | `ui/` | The screens, in Jetpack Compose. |
+| `widget/` | The home screen widgets, drawn with Android's RemoteViews. |
 
 ## The big picture
 
@@ -26,7 +27,7 @@ All code lives in `app/src/main/java/app/struthio/nostr/`, in four folders:
 3. Events are stored in batches in **Store**, the SQLite database. After each batch, Core sends a signal on `changes`.
 4. Screens read from the database through `liveQuery` (in `ui/Common.kt`), which runs its query again when `changes` fires. So what you see is always what's stored, and it shows up at once when the app opens, even offline.
 
-`ZinoApp` keeps the list of accounts and one `Core` for the account in use. `MainActivity` is the only Android screen; `ui/App.kt` draws everything inside it.
+`ZinoApp` keeps the list of accounts and one `Core` for the account in use. `MainActivity` is the only Android screen; `ui/App.kt` draws everything inside it. `Shortcuts.kt` holds the launcher shortcuts and the actions they and the widgets open the app with.
 
 ## Accounts
 
@@ -160,7 +161,7 @@ Zap receipts only count after they're checked against the key of the lightning s
 Zino uses no push service. `data/Notifier.kt` asks Android's JobScheduler to run a short check every so often (15 minutes by default). There's one job for the whole app, set to the most frequent interval any signed-in account wants; each account skips runs that come sooner than its own setting, and an account with checks off is never checked. Each check runs `Core.backgroundCheck`:
 
 1. connect to relays,
-2. look for new replies, mentions, reactions, zaps and messages,
+2. look for new replies, mentions, reactions, zaps and messages (and new posts for the Following widget, if one is placed),
 3. show notifications,
 4. disconnect.
 
@@ -169,6 +170,23 @@ Message notifications never say who sent the message or what it says.
 **Every account.** `ZinoApp.checkAllAccounts` runs the check for the account in use and, side by side, for each other signed-in account through a short-lived `Core` of its own, closed afterwards. Each account has its own summary and message notifications, so one can't replace another's. With more than one account, each notification names its account, and tapping one switches to that account first (`Notifier.EXTRA_ACCOUNT`).
 
 **Shrinking the database.** Android's SQLite trims the database file as rows are deleted (auto-vacuum), so space from cleanups mostly comes back by itself. As a safety net, at most once a week a background check runs `Store.compactIfWasteful`: if 8 MB or more of empty space is left inside the file anyway, it rebuilds the file (VACUUM). That runs in the background because the rebuild would slow the app down while it's open.
+
+## Shortcuts and widgets
+
+**Long-press shortcuts.** Holding Zino's icon offers New post, Messages and Scan QR code. `Shortcuts.install` adds them from code each time the app starts, replacing them only when their names change, since a shortcut written in XML must name the package and test builds have a `.debug` one. Each opens `MainActivity` with an action, which `Shortcuts.linkOf` turns into a `zino:` link (`zino:compose`, `zino:messages`, `zino:scan`, `zino:wallet`). It travels to `ui/App.kt` through the same `deepLink` as a `nostr:` link. Scan QR code opens the scanner over the app and opens what it reads like any other link: a profile, a post or a wallet connection.
+
+**Widgets** are plain app widgets (`AppWidgetProvider` and `RemoteViews`), not Jetpack Glance, so they need no library. They show the account in use and never go to the network themselves:
+
+| Widget | File | Shows |
+|---|---|---|
+| Write a post | `widget/ComposeWidget.kt` | A pill that opens a new post |
+| Wallet | `widget/WalletWidget.kt` | The last balance the wallet gave, when, and an eye button that hides it. Tapping opens the Wallet tab. |
+| Following | `widget/FeedWidget.kt` | The newest 20 stored posts from people you follow, without muted ones. Tapping a post opens it; the pencil writes a post. |
+
+- **Redrawing.** `Widgets.update` (in `widget/Widgets.kt`) redraws them all when the app goes to the background, when the account changes, when the wallet answers or is removed, and after each background check.
+- **The balance** is saved in the account's settings by `Wallet` each time the wallet answers `get_balance`, since asking the wallet means relays and a wait. Hiding it is a setting of the widgets, not of an account.
+- **The Following list** is read from the database by `FeedService`, which Android runs in Zino's process. Profile pictures come only from the picture cache, so anyone whose picture was never shown gets a plain circle. While a Following widget is placed, each background check also asks up to four relays for posts newer than the newest one stored (`Core.fetchWidgetFeed`), picking them from relay lists already on the phone. So the widget keeps up while the app is closed, but only as often as checks run, and not at all with checks turned off.
+- **Taps** carry the account (`Notifier.EXTRA_ACCOUNT`), so a widget tap opens that account even if another is in use by then.
 
 ## Muting
 
@@ -210,7 +228,7 @@ Some text still comes in English from places that can't use Android resources: w
 
 ## Tests and checks
 
-- **Unit tests** are in `app/src/test/`. They cover the protocol code in `core/` (using the published NIP test vectors where they exist), and the relay pool, WebSocket client and relay stats in `net/`. Tests in `data/` run with Robolectric, which gives them Android's real SQLite on the computer. They cover the database (replaceable events, deletions, counts, messages, the outbox), accounts, opening gift wraps, and keeping posts made without a connection.
+- **Unit tests** are in `app/src/test/`. They cover the protocol code in `core/` (using the published NIP test vectors where they exist), and the relay pool, WebSocket client and relay stats in `net/`. Tests in `data/` run with Robolectric, which gives them Android's real SQLite on the computer. They cover the database (replaceable events, deletions, counts, messages, the outbox), accounts, opening gift wraps, and keeping posts made without a connection. `ShortcutsTest` checks which links the launcher shortcuts open.
 - **Device checks** are in `scripts/`. They run by hand from GitHub Actions on an emulator and sign in read-only, so they never publish anything:
   - `smoke.sh` walks through the main screens.
   - `kinds-check.sh` checks how the different post kinds are drawn.

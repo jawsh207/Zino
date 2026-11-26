@@ -78,6 +78,7 @@ import app.struthio.nostr.core.values
 import app.struthio.nostr.core.zapSplits
 import app.struthio.nostr.net.Bech32Lnurl
 import app.struthio.nostr.net.AppLog
+import app.struthio.nostr.widget.Widgets
 import app.struthio.nostr.net.Http
 import app.struthio.nostr.net.RelayPool
 import app.struthio.nostr.net.RelayStats
@@ -2021,6 +2022,7 @@ class Core(
                 listOf(Filter(kinds = ALERT_KINDS, tags = mapOf("p" to listOf(pubkey)), since = since, limit = 50)),
                 onEvent = ::ingest,
             )
+            if (Widgets.hasFeed(context)) fetchWidgetFeed(checker)
             val wraps = ArrayList<Event>()
             val inbox = dmRelays.value.toSet()
             if (inbox.isNotEmpty() && active !is ReadOnlySigner) {
@@ -2054,6 +2056,34 @@ class Core(
             checker.shutdown()
         }
     }
+
+    /**
+     * Brings in the newest posts by the people you follow, for the feed widget, during a background
+     * check. Only relay lists already stored are used to pick relays: fetching missing ones would
+     * take longer than Android gives the check.
+     */
+    private suspend fun fetchWidgetFeed(checker: RelayPool) {
+        val authors = follows.value
+        if (authors.isEmpty()) return
+        val newest = store.followingFeed(1, nowSeconds() + 60).firstOrNull()?.createdAt
+        val since = newest?.plus(1) ?: (nowSeconds() - 86_400)
+        val relays = chooseRelays(authors, { relaysOf(it)?.write.orEmpty() }, WIDGET_RELAYS, redundancy = 1).keys
+            .ifEmpty { readRelays().take(WIDGET_RELAYS).toSet() }
+        val filters = authors.chunked(500).map { Filter(authors = it, kinds = WIDGET_KINDS, since = since, limit = 20) }
+        checker.query(relays, filters, onEvent = ::ingest)
+    }
+
+    /** Tells the home screen widgets to redraw, as when the wallet balance changes. */
+    fun widgetsChanged() = Widgets.update(context)
+
+    /** A person's profile as stored, for places outside the screens like widgets. Any thread. */
+    fun storedProfile(pubkey: String): Profile? = store.latest(pubkey, Kind.METADATA)?.let(::parseProfile)
+
+    /**
+     * True if a wallet connection is saved for this account. Read from settings, not the encrypted
+     * secrets, so widgets can ask on the main thread without waiting on the Keystore.
+     */
+    fun hasWallet(): Boolean = prefs.contains(Wallet.METHODS) || prefs.contains(Wallet.BALANCE_KEY)
 
     /**
      * Shrinks the database file at most once a week, during a background check: rebuilding it
@@ -2333,6 +2363,10 @@ class Core(
         private const val IMAGE_CACHE_BYTES = 80L * 1024 * 1024
         private const val RELAY_INFO_MS = 86_400_000L
         private const val MAX_FEED_RELAYS = 8
+
+        /** How many relays a background check asks for the feed widget, and which kinds it shows. */
+        private const val WIDGET_RELAYS = 4
+        private val WIDGET_KINDS = listOf(Kind.NOTE, Kind.REPOST, Kind.PICTURE, Kind.ARTICLE)
         private const val TRUST_THRESHOLD = 2
         private const val MAX_NOTIFIED_NAMES = 8
         private const val FIRST_CHECK_WINDOW_S = 6 * 3600L
